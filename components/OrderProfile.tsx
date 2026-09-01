@@ -191,7 +191,7 @@ function RotateTokenButton({ orderId }: { orderId: string }) {
       disabled={isPending}
       onClick={() => {
         if (confirm("This invalidates the old client link and creates a new one. Continue?")) {
-          startTransition(() => rotateClientToken(orderId));
+          startTransition(async () => { await rotateClientToken(orderId); });
         }
       }}
       className="focus-ring rounded-lg border border-linen bg-white px-3 py-1.5 text-sm text-charcoal/60 hover:bg-cream"
@@ -215,7 +215,7 @@ function GeneralNotesAndPayment({ order, role }: { order: any; role: "EMPLOYEE" 
             <button
               key={status}
               disabled={isPending}
-              onClick={() => startTransition(() => updatePaymentStatus(order.id, status))}
+              onClick={() => startTransition(async () => { await updatePaymentStatus(order.id, status); })}
               className={`rounded-full border px-3 py-1 text-xs ${
                 order.paymentStatus === status
                   ? "border-thread bg-thread text-cream"

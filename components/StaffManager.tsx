@@ -71,7 +71,7 @@ function EmployeeSection({ employees }: { employees: any[] }) {
               )}
               <button
                 disabled={isPending}
-                onClick={() => startTransition(() => setEmployeeActive(e.id, !e.active))}
+                onClick={() => startTransition(async () => { await setEmployeeActive(e.id, !e.active); })}
                 className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
               >
                 {e.active ? "Deactivate" : "Reactivate"}

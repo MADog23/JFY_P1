@@ -54,7 +54,7 @@ function TaxonomyList({
         {items.map((item) => (
           <button
             key={item.id}
-            onClick={() => startTransition(() => onToggle(item.id, !item.active))}
+            onClick={() => startTransition(async () => { await onToggle(item.id, !item.active); })}
             className={`rounded-full border px-3 py-1.5 text-sm ${
               item.active
                 ? "border-linen bg-cream text-ink"

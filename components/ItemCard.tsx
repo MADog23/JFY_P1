@@ -12,6 +12,8 @@ import {
   authorizeItemPickup,
   updateItemIntake,
 } from "@/actions/items";
+import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
+import { formatCents } from "@/lib/money";
 
 export default function ItemCard({
   item,
@@ -165,6 +167,14 @@ export default function ItemCard({
           alterationTypes={alterationTypes}
           onDone={() => setEditingIntake(false)}
         />
+      )}
+
+      {/* Pricing — manager-only to view or edit once the order exists. Employees never
+          receive item.priceLines at all (stripped server-side in getOrderDetail), so
+          this section renders nothing for them even without the role check below —
+          the role check just avoids showing a manager-only control to an employee. */}
+      {role === "MANAGER" && (
+        <ItemPricing orderId={item.orderId} orderItemId={item.id} priceLines={item.priceLines ?? []} />
       )}
 
       {/* Measurements */}
@@ -443,6 +453,41 @@ function MeasurementRow({ measurement }: { measurement: any }) {
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Manager-only. Employees never see this component's data even if it somehow rendered
+ * for them — getOrderDetail() strips item.priceLines to [] server-side before an
+ * employee's page ever receives it — but ItemCard also gates on role so an employee
+ * never sees the "Add a price line" control in the first place.
+ */
+function ItemPricing({
+  orderId,
+  orderItemId,
+  priceLines,
+}: {
+  orderId: string;
+  orderItemId: string;
+  priceLines: any[];
+}) {
+  const itemTotal = priceLines.reduce((sum: number, pl: any) => sum + pl.amountCents, 0);
+
+  return (
+    <div className="mb-4 rounded-xl border border-brass/30 bg-brass/5 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium uppercase tracking-wide text-thread">Pricing (manager only)</p>
+        {priceLines.length > 0 && <span className="text-sm font-medium text-ink">{formatCents(itemTotal)}</span>}
+      </div>
+      {priceLines.length > 0 && (
+        <div className="mb-2 divide-y divide-brass/20">
+          {priceLines.map((pl: any) => (
+            <PriceLineRow key={pl.id} line={pl} />
+          ))}
+        </div>
+      )}
+      <AddPriceLineForm orderId={orderId} orderItemId={orderItemId} />
     </div>
   );
 }

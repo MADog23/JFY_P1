@@ -6,7 +6,7 @@ import { requireManager } from "@/lib/auth";
 export async function getAnalytics() {
   await requireManager();
 
-  const [orderStatusCounts, itemStatusCounts, paymentCounts, overdue, recentSealed, totalOrders] =
+  const [orderStatusCounts, itemStatusCounts, paymentCounts, overdue, recentSealed, totalOrders, revenue] =
     await Promise.all([
       db.order.groupBy({ by: ["status"], _count: true }),
       db.orderItem.groupBy({ by: ["status"], _count: true }),
@@ -21,6 +21,9 @@ export async function getAnalytics() {
         take: 200,
       }),
       db.order.count(),
+      // Pricing is a manager-only surface end to end, so it's safe to aggregate raw
+      // totals here — this whole action is already gated by requireManager() above.
+      db.order.aggregate({ _sum: { totalPriceCents: true }, _avg: { totalPriceCents: true } }),
     ]);
 
   const turnaroundDays = recentSealed
@@ -38,5 +41,7 @@ export async function getAnalytics() {
     paymentCounts: Object.fromEntries(paymentCounts.map((r) => [r.paymentStatus, r._count])),
     overdueActiveOrders: overdue,
     avgTurnaroundDays,
+    totalRevenueCents: revenue._sum.totalPriceCents ?? 0,
+    avgOrderValueCents: revenue._avg.totalPriceCents ?? 0,
   };
 }

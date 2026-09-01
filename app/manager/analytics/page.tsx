@@ -1,5 +1,6 @@
 import { requireManager } from "@/lib/auth";
 import { getAnalytics } from "@/actions/analytics";
+import { formatCents } from "@/lib/money";
 import { TopNav } from "@/components/TopNav";
 
 export default async function AnalyticsPage() {
@@ -25,6 +26,14 @@ export default async function AnalyticsPage() {
             value={stats.avgTurnaroundDays !== null ? `${stats.avgTurnaroundDays} days` : "—"}
           />
         </div>
+
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
+          <StatCard label="Total revenue (priced orders)" value={formatCents(stats.totalRevenueCents)} />
+          <StatCard label="Avg. order value" value={formatCents(stats.avgOrderValueCents)} />
+        </div>
+        <p className="mb-6 -mt-3 text-xs text-charcoal/40">
+          Based on itemized pricing entered on each order. Orders with no pricing entered yet count as $0.
+        </p>
 
         <div className="grid gap-6 sm:grid-cols-2">
           <BreakdownCard

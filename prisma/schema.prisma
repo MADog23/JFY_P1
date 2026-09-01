@@ -39,6 +39,14 @@ enum ItemStatus {
   PICKED_UP // locked — terminal
 }
 
+// Where a PriceLine's description came from — purely informational (drives the
+// receipt UI grouping), not a permissions distinction.
+enum PriceLineSource {
+  ALTERATION // auto-generated from a selected alteration checkbox
+  CUSTOM_INSTRUCTIONS // auto-generated from an item's alterationsCustom free text
+  FREEFORM // manually added by whoever was pricing the ticket (item- or order-level)
+}
+
 model User {
   id        String   @id @default(cuid())
   name      String
@@ -59,6 +67,8 @@ model User {
   images          ItemImage[]
   pickupsHandled  ItemPickup[]   @relation("PickupAuthorizedBy")
   auditLogs       AuditLog[]
+  priceLinesCreated PriceLine[]  @relation("PriceLineCreatedBy")
+  priceLinesUpdated PriceLine[]  @relation("PriceLineUpdatedBy")
 }
 
 model Order {
@@ -77,6 +87,13 @@ model Order {
   status        OrderStatus   @default(IN_PROGRESS)
   paymentStatus PaymentStatus @default(UNPAID)
 
+  // Denormalized sum of every PriceLine on this order (item-level + order-level),
+  // recomputed by lib/pricing.ts any time a line is added/edited/removed. This field
+  // stays visible to employees (so they can answer "how much do I owe") even though
+  // the itemized PriceLine rows themselves are manager-only once the order exists —
+  // see actions/orders.ts:getOrderDetail for where that redaction happens.
+  totalPriceCents Int @default(0)
+
   // Public read-only client link. No expiration by design decision; a manager can
   // rotate it (see actions/orders.ts:rotateClientToken) as a manual safety valve.
   clientToken String @unique
@@ -91,6 +108,9 @@ model Order {
 
   items     OrderItem[]
   auditLogs AuditLog[]
+  // Order-level price lines only (orderItemId null on PriceLine) — e.g. a rush fee
+  // not tied to any single garment. Per-item lines are reached via OrderItem.priceLines.
+  priceLines PriceLine[]
 
   @@index([status])
   @@index([clientName])
@@ -120,6 +140,7 @@ model OrderItem {
   measurements ItemMeasurement[]
   images       ItemImage[]
   pickup       ItemPickup?
+  priceLines   PriceLine[]
 
   @@index([orderId])
   @@index([status])
@@ -179,6 +200,40 @@ model ItemPickup {
   authorizedById  String
   authorizedBy    User      @relation("PickupAuthorizedBy", fields: [authorizedById], references: [id])
   pickedUpAt      DateTime  @default(now())
+}
+
+// Itemized pricing, receipt-style. Rows can be created two ways:
+//   1. During intake creation (createIntakeTicket) — employee OR manager, one-shot.
+//   2. Afterward, only through actions/pricing.ts, which is MANAGER ONLY.
+// There's no separate "locked" flag on the row itself: the lock is enforced entirely
+// by which code path is allowed to write after the order exists (see actions/pricing.ts).
+// Visibility is a *different* axis from editability — actions/orders.ts:getOrderDetail
+// strips these rows out of the payload entirely for employees once the order exists,
+// so an employee never receives the breakdown even read-only. Only Order.totalPriceCents
+// and Order.paymentStatus stay visible to them.
+model PriceLine {
+  id          String @id @default(cuid())
+  orderId     String
+  order       Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Null = order-level line not tied to a specific garment (e.g. a rush fee).
+  orderItemId String?
+  orderItem   OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  description String
+  amountCents Int
+  source      PriceLineSource @default(FREEFORM)
+
+  createdById String
+  createdBy   User   @relation("PriceLineCreatedBy", fields: [createdById], references: [id])
+  updatedById String?
+  updatedBy   User?  @relation("PriceLineUpdatedBy", fields: [updatedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([orderItemId])
 }
 
 // The accountability trail: every mutation across the system writes one of these.

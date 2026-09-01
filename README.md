@@ -26,6 +26,12 @@ styled with Tailwind, deployed on **Railway**.
   accounts, manage the garment/alteration option lists, and a basic analytics page.
 - **Photo capture placeholder**: the UI and data model support photos now; actual file
   storage is intentionally not wired up yet (see `lib/images.ts` for how to connect it).
+- **Itemized pricing**: a second, receipt-style step in the intake form where an
+  employee can price out each selected alteration (plus freeform lines, e.g. a rush
+  fee) — entirely optional, anything left blank can be filled in later. Once the
+  ticket is created, the itemized breakdown becomes **manager-only** for both editing
+  and *viewing* — employees still see the order's running total and payment status, but
+  never the line-by-line breakdown. See "Itemized pricing" below for the full rule set.
 
 ## Explicit assumptions / product decisions made along the way
 
@@ -48,6 +54,38 @@ conservative/self-reliant choice — flag anything you want changed:
 - **Multi-manager support**: any manager can create additional manager accounts from the
   Staff page (useful once there's more than one manager/owner).
 
+## Itemized pricing
+
+Added after the initial Phase 1 build, on top of the original "no pricing" decision above.
+
+- **Entry point**: the intake form is now a two-step wizard. Step 1 is unchanged
+  (client/pickup contact + items). Step 2, "Itemized pricing," auto-generates one price
+  row per selected alteration on each item (plus a row for any custom-instructions text),
+  and lets the employee add freeform rows too — either tied to one item (e.g. "extra
+  fabric") or order-wide (e.g. a rush fee). Every row is optional; anything left blank
+  simply isn't saved as a `PriceLine`, and a manager can add or fix it later.
+- **The lock**: once the ticket is created, `createIntakeTicket` is the *only* place a
+  non-manager is ever allowed to write a `PriceLine`. Every add/edit/delete after that
+  goes through `actions/pricing.ts`, which is manager-only, full stop — mirroring how
+  `garmentType`/`description` lock after intake, just with a dedicated action file
+  instead of a manager-only branch inside `actions/items.ts`.
+- **The visibility rule (stricter than the lock)**: this is the one place in the app
+  where "locked" and "hidden" are different things. Every other intake-locked field
+  (garment type, description, alterations) stays employee-*visible*, just read-only.
+  Itemized pricing does not — once the order exists, an employee's `getOrderDetail()`
+  result has every `PriceLine` stripped out server-side (see the redaction in
+  `actions/orders.ts`), so the breakdown never reaches their page at all, not even in
+  the RSC payload. What an employee *does* still see is `Order.totalPriceCents` (a
+  denormalized sum, recomputed by `lib/pricing.ts` after every price-line change) and
+  `paymentStatus` — enough to answer "how much do I owe" at the counter, but no
+  itemized detail and no edit controls.
+- **Analytics**: `actions/analytics.ts` now also returns total revenue and average
+  order value, computed straight from `Order.totalPriceCents` — safe to aggregate raw
+  since that whole action is already manager-gated.
+- **Money handling**: everything is stored as integer cents (`PriceLine.amountCents`,
+  `Order.totalPriceCents`); `lib/money.ts` has the only formatting/parsing helpers
+  (`formatCents`, `parseDollarsToCents`) — nothing else should touch a raw dollar float.
+
 ## Project structure
 
 ```
@@ -57,11 +95,15 @@ app/                      Next.js App Router pages
   manager/                 Manager dashboard, order profile, staff, taxonomy, analytics
   track/[token]/           Public read-only client tracking page
 actions/                  Server actions (all mutations + audit logging live here)
+  pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake
 lib/                      DB client, auth/session, audit log, order numbering,
                            order-status lifecycle, client-view redaction
+  pricing.ts                recomputeOrderTotal — call inside any PriceLine mutation's tx
+  money.ts                   formatCents / parseDollarsToCents — the only place cents<->dollars happens
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
+  PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
 prisma/schema.prisma      Full data model
-prisma/migrations/        Hand-authored initial migration (ready for `migrate deploy`)
+prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`)
 prisma/seed.ts            Creates first manager login + default taxonomy
 ```
 
@@ -78,6 +120,9 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Manage employee PINs / manager accounts              |    No    |   Yes   |
 | Manage garment/alteration options                    |    No    |   Yes   |
 | View analytics                                       |    No    |   Yes   |
+| Enter itemized pricing **at intake creation only**    |   Yes    |   Yes   |
+| View / edit itemized pricing **after** intake exists  |    No    |   Yes   |
+| View order total & payment status                     |   Yes    |   Yes   |
 
 ## Running locally
 
@@ -119,8 +164,10 @@ dev database) — Railway will apply it on the next deploy.
 
 - **Real photo storage**: see the comment block in `lib/images.ts` — the schema and UI
   are already shaped for it, only a storage client and one field need to change.
-- **Pricing**: `Order.paymentStatus` already exists; adding a `priceCents` field to
-  `Order` or `OrderItem` is a small, additive migration.
+- **Pricing**: itemized pricing now exists (see "Itemized pricing" above). Not yet
+  built: a manager-facing "print/export receipt" view of the breakdown, and any
+  concept of partial payments/deposits beyond the existing `Unpaid`/`Deposit paid`/
+  `Paid` status enum — `Order.totalPriceCents` is a total, not a running balance.
 - **SMS/email notifications**: intentionally out of scope — the brief was explicit that
   this phase is about giving clients *access* to status, not pushing them updates.
 - **Multi-location**: the schema has no location/store concept yet; if a second location

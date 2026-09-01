@@ -3,11 +3,13 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession, requireManager } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { nextOrderNumber } from "@/lib/order-number";
 import { generateClientToken } from "@/lib/token";
+import { recomputeOrderTotal } from "@/lib/pricing";
 import type { ActionResult } from "./auth";
 
 export async function listOrders(filter?: "ACTIVE" | "SEALED" | "PICKED_UP" | "ALL") {
@@ -37,12 +39,25 @@ export async function listOrders(filter?: "ACTIVE" | "SEALED" | "PICKED_UP" | "A
   });
 }
 
+/**
+ * PRICING VISIBILITY: itemized PriceLine rows are manager-only to even *view*, not just
+ * edit — this is a stricter rule than the rest of the app's intake-lock fields (which
+ * stay employee-visible, read-only). So this always fetches the full record (managers
+ * need it, and one code path is less to keep in sync), then strips priceLines out of
+ * the object entirely for non-managers before it's ever serialized to the client. Order
+ * total (totalPriceCents) and paymentStatus are NOT stripped — those stay visible to
+ * employees by design (see lib/pricing.ts and the PriceLine model comment).
+ */
 export async function getOrderDetail(orderId: string) {
-  await requireSession();
-  return db.order.findUnique({
+  const session = await requireSession();
+  const order = await db.order.findUnique({
     where: { id: orderId },
     include: {
       createdBy: { select: { name: true } },
+      priceLines: {
+        include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
       items: {
         orderBy: { createdAt: "asc" },
         include: {
@@ -50,6 +65,10 @@ export async function getOrderDetail(orderId: string) {
           measurements: { include: { updatedBy: { select: { name: true } } }, orderBy: { label: "asc" } },
           images: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
           pickup: { include: { authorizedBy: { select: { name: true } } } },
+          priceLines: {
+            include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
+            orderBy: { createdAt: "asc" },
+          },
         },
       },
       auditLogs: {
@@ -59,13 +78,35 @@ export async function getOrderDetail(orderId: string) {
       },
     },
   });
+
+  if (!order) return null;
+  if (session.role === "MANAGER") return order;
+
+  // Employee view: strip the itemized breakdown, keep the total + payment status.
+  return {
+    ...order,
+    priceLines: [],
+    items: order.items.map((item) => ({ ...item, priceLines: [] })),
+  };
 }
+
+// Itemized pricing entered at intake time — see the "Itemized pricing" step of
+// components/IntakeForm.tsx. Optional by design: an employee can create a ticket with
+// some, all, or none of these filled in, and a manager can add/fix pricing afterward
+// (actions/pricing.ts) — but ONLY afterward; this is the one and only entry point
+// where a non-manager is ever allowed to write a PriceLine.
+const priceLineDraftSchema = z.object({
+  description: z.string().min(1),
+  amountCents: z.number().int().min(0),
+  source: z.enum(["ALTERATION", "CUSTOM_INSTRUCTIONS", "FREEFORM"]).default("FREEFORM"),
+});
 
 const itemSchema = z.object({
   garmentType: z.string().min(1),
   description: z.string().min(1),
   alterations: z.array(z.string()).default([]),
   alterationsCustom: z.string().optional(),
+  priceLines: z.array(priceLineDraftSchema).default([]),
 });
 
 const intakeSchema = z.object({
@@ -76,6 +117,8 @@ const intakeSchema = z.object({
   pickupContactPhone: z.string().optional(),
   dueDate: z.string().optional(),
   items: z.array(itemSchema).min(1, "Add at least one item to the order."),
+  // Freeform charges not tied to any one item (e.g. a rush fee).
+  orderPriceLines: z.array(priceLineDraftSchema).default([]),
 });
 
 /** Employee OR manager: creates the intake ticket. Locked after this point except by a manager. */
@@ -125,6 +168,49 @@ export async function createIntakeTicket(
       },
       tx
     );
+
+    // Item order in `created.items` matches `data.items` input order (Prisma nested
+    // creates run sequentially in array order), so index-pairing them here is safe.
+    const priceLineRows: Prisma.PriceLineCreateManyInput[] = [];
+    data.items.forEach((item, i) => {
+      const orderItemId = created.items[i].id;
+      item.priceLines.forEach((pl) => {
+        priceLineRows.push({
+          orderId: created.id,
+          orderItemId,
+          description: pl.description,
+          amountCents: pl.amountCents,
+          source: pl.source,
+          createdById: session.userId,
+        });
+      });
+    });
+    data.orderPriceLines.forEach((pl) => {
+      priceLineRows.push({
+        orderId: created.id,
+        orderItemId: null,
+        description: pl.description,
+        amountCents: pl.amountCents,
+        source: "FREEFORM",
+        createdById: session.userId,
+      });
+    });
+
+    if (priceLineRows.length > 0) {
+      await tx.priceLine.createMany({ data: priceLineRows });
+      await recomputeOrderTotal(created.id, tx);
+      await logAudit(
+        {
+          orderId: created.id,
+          entityType: "ORDER",
+          entityId: created.id,
+          action: "PRICING_SET_AT_INTAKE",
+          summary: `${priceLineRows.length} price line(s) entered at intake for ${created.orderNumber} by ${session.name}.`,
+          performedById: session.userId,
+        },
+        tx
+      );
+    }
 
     return created;
   });

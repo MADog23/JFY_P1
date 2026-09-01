@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { StatusBadge } from "./StatusBadge";
 import ItemCard from "./ItemCard";
+import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
 import {
   updateGeneralNotes,
   updatePaymentStatus,
@@ -10,6 +11,7 @@ import {
   rotateClientToken,
 } from "@/actions/orders";
 import { addItemToOrder } from "@/actions/items";
+import { formatCents } from "@/lib/money";
 
 export default function OrderProfile({
   order,
@@ -28,6 +30,7 @@ export default function OrderProfile({
     <div className="space-y-6">
       <OrderHeader order={order} role={role} trackingUrl={trackingUrl} />
       <GeneralNotesAndPayment order={order} role={role} />
+      {role === "MANAGER" && <PricingPanel order={order} />}
 
       <section>
         <div className="mb-3 flex items-center justify-between">
@@ -209,7 +212,12 @@ function GeneralNotesAndPayment({ order, role }: { order: any; role: "EMPLOYEE" 
   return (
     <div className="rounded-2xl border border-linen bg-white p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-charcoal/50">Payment status</p>
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-charcoal/50">Payment status</p>
+          <p className="mt-1 text-sm text-charcoal/60">
+            Order total <span className="font-display text-base text-ink">{formatCents(order.totalPriceCents)}</span>
+          </p>
+        </div>
         <div className="flex gap-2">
           {(["UNPAID", "DEPOSIT_PAID", "PAID"] as const).map((status) => (
             <button
@@ -252,6 +260,38 @@ function GeneralNotesAndPayment({ order, role }: { order: any; role: "EMPLOYEE" 
         {savedAt && <span className="text-xs text-sage">Saved</span>}
       </div>
     </div>
+  );
+}
+
+/**
+ * Manager-only. order.priceLines only ever reaches this component non-empty for a
+ * manager — employees get [] server-side (see actions/orders.ts:getOrderDetail) — and
+ * OrderProfile also gates rendering this whole panel on role === "MANAGER".
+ * Per-item price lines are edited from each item's own card (ItemCard); this panel is
+ * only for order-wide charges not tied to a single garment.
+ */
+function PricingPanel({ order }: { order: any }) {
+  const orderLevelLines = (order.priceLines ?? []).filter((pl: any) => !pl.orderItemId);
+
+  return (
+    <section className="rounded-2xl border border-linen bg-white p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="font-display text-lg text-ink">Itemized pricing</h2>
+        <span className="text-sm font-medium text-ink">Order total: {formatCents(order.totalPriceCents)}</span>
+      </div>
+      <p className="mb-3 text-xs text-charcoal/50">
+        Manager only. Per-item pricing is edited from each item's card below — this section is for
+        charges that apply to the whole order rather than one garment (e.g. a rush fee).
+      </p>
+      {orderLevelLines.length > 0 && (
+        <div className="mb-2 divide-y divide-linen">
+          {orderLevelLines.map((pl: any) => (
+            <PriceLineRow key={pl.id} line={pl} />
+          ))}
+        </div>
+      )}
+      <AddPriceLineForm orderId={order.id} orderItemId={null} placeholder="Add an order-wide charge…" />
+    </section>
   );
 }
 

@@ -11,12 +11,9 @@ styled with Tailwind, deployed on **Railway**.
   only a manager can edit intake-level fields afterward.
 - **Working profiles**: notes and measurements per item, open to employees and managers
   for the life of the item.
-- **Item lifecycle**: Not started → In progress → Completed (locked) → Picked up. Either
-  an employee or a manager can authorize pickup — it's per item, so **partial pickup**
-  (some items of an order picked up, others not) and picking up a whole order (every
-  item, one at a time) both work the same way for either role. Only a manager can reopen
-  a completed item, or **undo an accidental pickup** (puts the item back to completed;
-  the original pickup stays visible in the activity log either way).
+- **Item lifecycle**: Not started → In progress → Completed (locked) → Picked up. Only a
+  manager can reopen a completed item or authorize pickup, including **partial pickup**
+  of individual items.
 - **Order sealing**: once every item on an order is completed, the order auto-seals
   (read-only) until a manager reopens an item.
 - **Public client tracking link**: a no-login, read-only page showing order/item status
@@ -50,12 +47,10 @@ conservative/self-reliant choice — flag anything you want changed:
 - **Pricing**: not tracked in Phase 1. Payment *status* (Unpaid / Deposit paid / Paid) is
   tracked, with no card processing involved.
 - **Client-view redaction**: the public tracking page shows only order number, due date,
-  overall status, and each item's garment type + description + status (+ pickup date if
-  applicable) — the description is included so a client can tell apart similar items on
-  one order (e.g. which bridesmaid dress is which). Everything else — contact details,
-  internal notes, measurements, staff names (including who picked an item up), payment
-  status, and the audit log — is withheld by design. If you want to loosen this, it's a
-  single, well-commented function: `lib/client-view.ts`.
+  overall status, and each item's garment type + status (+ pickup date if applicable).
+  Everything else — contact details, internal notes, measurements, staff names (including
+  who picked an item up), payment status, and the audit log — is withheld by design. If
+  you want to loosen this, it's a single, well-commented function: `lib/client-view.ts`.
 - **Multi-manager support**: any manager can create additional manager accounts from the
   Staff page (useful once there's more than one manager/owner).
 
@@ -88,9 +83,8 @@ Added after the initial Phase 1 build, on top of the original "no pricing" decis
   (from `Order.totalPriceCents`), plus four breakdowns built from the itemized price
   lines themselves: revenue by alteration type, revenue by garment type, a revenue
   composition split (standard alterations / custom instructions / freeform write-ins),
-  and an "Unpriced alterations" count — the literal number of checked alterations on
-  open tickets that still have no price line, shown as a total and broken out per
-  order (e.g. "3 unpriced") rather than an unexplained per-order flag. The alteration and garment breakdowns only work because
+  and a "needs a pricing pass" list of open orders where a checked alteration still has
+  no price line. The alteration and garment breakdowns only work because
   `PriceLine.description` is a controlled vocabulary for `ALTERATION`-sourced rows
   (always the exact taxonomy label, never free text) — freeform write-ins have no such
   structure, which is why they stay lumped into one bucket in the composition split
@@ -130,8 +124,7 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Add notes & measurements                            |    Yes   |   Yes   |
 | Start / complete an item                            |    Yes   |   Yes   |
 | Reopen a completed item                             |    No    |   Yes   |
-| Authorize item pickup (partial or full order)         |   Yes    |   Yes   |
-| Undo an accidental pickup                             |    No    |   Yes   |
+| Authorize item pickup                                |    No    |   Yes   |
 | Manage employee PINs / manager accounts              |    No    |   Yes   |
 | Manage garment/alteration options                    |    No    |   Yes   |
 | View analytics                                       |    No    |   Yes   |

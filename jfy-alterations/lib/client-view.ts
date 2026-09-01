@@ -9,10 +9,8 @@ import { db } from "./db";
  * page is allowed to show is an explicit allow-list, not the raw records:
  *
  *   SHOWN:  order number, due date, overall order status, and per item: a plain
- *           garment label, its description (freeform text entered at intake — e.g.
- *           "Bridesmaid dress — Priya"; helps a client tell apart several similar
- *           items on one order), status (not started / in progress / ready for
- *           pickup / picked up), and the pickup date if applicable.
+ *           garment label + status (not started / in progress / ready for pickup /
+ *           picked up) + the pickup date if applicable.
  *   HIDDEN: client contact details (they already know their own info), pickup contact
  *           info, internal working notes, measurements, staff names (including who
  *           picked an item up — that's for internal accountability, not the client),
@@ -33,7 +31,6 @@ export async function getPublicOrderView(token: string) {
         select: {
           id: true,
           garmentType: true,
-          description: true,
           status: true,
           pickup: { select: { pickedUpAt: true } },
         },
@@ -52,7 +49,6 @@ export async function getPublicOrderView(token: string) {
     items: order.items.map((item) => ({
       id: item.id,
       garmentType: item.garmentType,
-      description: item.description,
       status: item.status,
       pickedUpAt: item.pickup?.pickedUpAt ?? null,
     })),

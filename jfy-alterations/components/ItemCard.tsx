@@ -10,7 +10,6 @@ import {
   deleteMeasurement,
   addImagePlaceholder,
   authorizeItemPickup,
-  undoItemPickup,
   updateItemIntake,
 } from "@/actions/items";
 import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
@@ -85,17 +84,15 @@ export default function ItemCard({
             Mark completed
           </button>
         )}
-        {item.status === "COMPLETED" && (
+        {item.status === "COMPLETED" && role === "MANAGER" && (
           <>
-            {role === "MANAGER" && (
-              <button
-                disabled={isPending}
-                onClick={() => run(() => reopenItem(item.id))}
-                className="focus-ring rounded-lg border border-linen bg-cream px-3 py-1.5 text-sm hover:bg-linen"
-              >
-                Reopen for more work
-              </button>
-            )}
+            <button
+              disabled={isPending}
+              onClick={() => run(() => reopenItem(item.id))}
+              className="focus-ring rounded-lg border border-linen bg-cream px-3 py-1.5 text-sm hover:bg-linen"
+            >
+              Reopen for more work
+            </button>
             <button
               disabled={isPending}
               onClick={() => setShowPickupForm((s) => !s)}
@@ -105,26 +102,16 @@ export default function ItemCard({
             </button>
           </>
         )}
+        {item.status === "COMPLETED" && role === "EMPLOYEE" && (
+          <p className="self-center text-xs text-charcoal/50">
+            Completed — a manager can reopen or authorize pickup.
+          </p>
+        )}
         {item.status === "PICKED_UP" && item.pickup && (
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="self-center text-xs text-charcoal/50">
-              Picked up {new Date(item.pickup.pickedUpAt).toLocaleString()} by {item.pickup.pickedUpByName}
-              {role === "MANAGER" ? ` · authorized by ${item.pickup.authorizedBy?.name}` : ""}
-            </p>
-            {role === "MANAGER" && (
-              <button
-                disabled={isPending}
-                onClick={() => {
-                  if (confirm(`Undo pickup of "${item.description}"? It'll go back to completed.`)) {
-                    run(() => undoItemPickup(item.id));
-                  }
-                }}
-                className="focus-ring rounded-lg border border-alert/40 px-2 py-1 text-xs text-alert hover:bg-alert/10"
-              >
-                Undo pickup
-              </button>
-            )}
-          </div>
+          <p className="self-center text-xs text-charcoal/50">
+            Picked up {new Date(item.pickup.pickedUpAt).toLocaleString()} by {item.pickup.pickedUpByName}
+            {role === "MANAGER" ? ` · authorized by ${item.pickup.authorizedBy?.name}` : ""}
+          </p>
         )}
         {role === "MANAGER" && !locked && (
           <button

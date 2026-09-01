@@ -281,19 +281,13 @@ export async function addImagePlaceholder(itemId: string, caption?: string): Pro
   return { ok: true };
 }
 
-/**
- * Employee or manager: authorizes pickup of a single completed item. Because this
- * operates per item, "partial pickup" (some items of an order picked up, others not)
- * and "order pickup" (every item eventually picked up, one at a time) both fall out
- * of this same action — there's no separate order-level pickup action, an order is
- * "picked up" once recomputeOrderStatus sees every item as PICKED_UP.
- */
+/** MANAGER ONLY: authorizes pickup of a single completed item (supports partial pickup). */
 export async function authorizeItemPickup(
   itemId: string,
   pickedUpByName: string,
   pickedUpByPhone?: string
 ): Promise<ActionResult> {
-  const session = await requireSession();
+  const session = await requireManager();
   if (!pickedUpByName.trim()) return { ok: false, error: "Enter who is picking up this item." };
 
   const item = await db.orderItem.findUnique({ where: { id: itemId } });
@@ -321,41 +315,6 @@ export async function authorizeItemPickup(
     entityId: itemId,
     action: "PICKUP_AUTHORIZED",
     summary: `"${item.description}" picked up by ${pickedUpByName.trim()}, authorized by ${session.name}.`,
-    performedById: session.userId,
-  });
-
-  revalidateOrder(item.orderId);
-  return { ok: true };
-}
-
-/**
- * MANAGER ONLY: undoes an accidental pickup — puts the item back to COMPLETED (its
- * state just before pickup) and removes the pickup record. The original pickup is
- * still visible in the order's activity log (the PICKUP_AUTHORIZED entry is never
- * deleted), so there's no loss of history, just a corrected current state.
- */
-export async function undoItemPickup(itemId: string): Promise<ActionResult> {
-  const session = await requireManager();
-  const item = await db.orderItem.findUnique({ where: { id: itemId }, include: { pickup: true } });
-  if (!item) return { ok: false, error: "Item not found." };
-  if (item.status !== "PICKED_UP" || !item.pickup) {
-    return { ok: false, error: "This item hasn't been picked up." };
-  }
-
-  const wasPickedUpBy = item.pickup.pickedUpByName;
-
-  await db.$transaction(async (tx) => {
-    await tx.itemPickup.delete({ where: { orderItemId: itemId } });
-    await tx.orderItem.update({ where: { id: itemId }, data: { status: "COMPLETED" } });
-    await recomputeOrderStatus(item.orderId, tx);
-  });
-
-  await logAudit({
-    orderId: item.orderId,
-    entityType: "ORDER_ITEM",
-    entityId: itemId,
-    action: "PICKUP_UNDONE",
-    summary: `Pickup of "${item.description}" (was picked up by ${wasPickedUpBy}) undone by ${session.name}. Item is back to completed.`,
     performedById: session.userId,
   });
 

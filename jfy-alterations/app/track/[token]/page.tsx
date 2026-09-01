@@ -46,10 +46,7 @@ export default async function TrackPage({ params }: { params: { token: string } 
               key={item.id}
               className="flex items-center justify-between rounded-xl border border-linen bg-white px-5 py-4"
             >
-              <div>
-                <p className="text-ink">{item.garmentType}</p>
-                {item.description && <p className="text-xs text-charcoal/50">{item.description}</p>}
-              </div>
+              <span className="text-ink">{item.garmentType}</span>
               <div className="text-right">
                 <span className="text-sm font-medium text-thread">
                   {ITEM_LABELS[item.status] ?? item.status}

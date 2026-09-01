@@ -20,3 +20,10 @@ prisma/dev.db
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Stray duplicate of the whole project that Windows' "Extract All" can create when a
+# delivered zip is extracted directly into this folder (it defaults to a subfolder
+# named after the zip, i.e. "jfy-alterations") — this has broken the production build
+# twice by shadowing real files with a stale nested copy. Extract zips to a SEPARATE
+# temp folder and copy only the changed files in, never directly into this folder.
+/jfy-alterations/

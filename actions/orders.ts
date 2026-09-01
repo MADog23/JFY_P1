@@ -27,9 +27,10 @@ export async function listOrders(params?: {
   search?: string;
   from?: string;
   to?: string;
+  assignedToId?: string;
 }) {
   await requireSession();
-  const { filter, search, from, to } = params ?? {};
+  const { filter, search, from, to, assignedToId } = params ?? {};
 
   const statusWhere: Prisma.OrderWhereInput =
     !filter || filter === "ALL"
@@ -59,8 +60,12 @@ export async function listOrders(params?: {
   if (to) createdAtWhere.lte = new Date(`${to}T23:59:59.999`);
   const dateWhere: Prisma.OrderWhereInput = from || to ? { createdAt: createdAtWhere } : {};
 
+  // "Assigned to me": at least one item on the order is assigned to this person —
+  // matches the per-item (not per-order) nature of assignment.
+  const assigneeWhere: Prisma.OrderWhereInput = assignedToId ? { items: { some: { assignedToId } } } : {};
+
   return db.order.findMany({
-    where: { ...statusWhere, ...searchWhere, ...dateWhere },
+    where: { ...statusWhere, ...searchWhere, ...dateWhere, ...assigneeWhere },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -69,6 +74,7 @@ export async function listOrders(params?: {
       status: true,
       dueDate: true,
       createdAt: true,
+      isRush: true,
       items: { select: { status: true } },
     },
     take: 100,
@@ -101,6 +107,8 @@ export async function getOrderDetail(orderId: string) {
           measurements: { include: { updatedBy: { select: { name: true } } }, orderBy: { label: "asc" } },
           images: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
           pickup: { include: { authorizedBy: { select: { name: true } } } },
+          assignedTo: { select: { id: true, name: true } },
+          assignedBy: { select: { name: true } },
           priceLines: {
             include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
             orderBy: { createdAt: "asc" },
@@ -152,6 +160,7 @@ const intakeSchema = z.object({
   pickupContactName: z.string().optional(),
   pickupContactPhone: z.string().optional(),
   dueDate: z.string().optional(),
+  isRush: z.boolean().default(false),
   items: z.array(itemSchema).min(1, "Add at least one item to the order."),
   // Freeform charges not tied to any one item (e.g. a rush fee).
   orderPriceLines: z.array(priceLineDraftSchema).default([]),
@@ -179,6 +188,7 @@ export async function createIntakeTicket(
         pickupContactName: data.pickupContactName || null,
         pickupContactPhone: data.pickupContactPhone || null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        isRush: data.isRush,
         clientToken: generateClientToken(),
         createdById: session.userId,
         items: {
@@ -264,6 +274,7 @@ const intakeEditSchema = z.object({
   pickupContactName: z.string().optional(),
   pickupContactPhone: z.string().optional(),
   dueDate: z.string().optional(),
+  isRush: z.boolean().default(false),
 });
 
 /** MANAGER ONLY: edits the locked intake identity fields on an existing order. */
@@ -287,6 +298,7 @@ export async function updateOrderIntake(
       pickupContactName: data.pickupContactName || null,
       pickupContactPhone: data.pickupContactPhone || null,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
+      isRush: data.isRush,
     },
   });
 

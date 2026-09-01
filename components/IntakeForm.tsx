@@ -95,6 +95,7 @@ export default function IntakeForm({
   const [pickupContactName, setPickupContactName] = useState("");
   const [pickupContactPhone, setPickupContactPhone] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [isRush, setIsRush] = useState(false);
   const [items, setItems] = useState<ItemDraft[]>([emptyItem()]);
   const [orderPriceLines, setOrderPriceLines] = useState<PriceLineDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +142,7 @@ export default function IntakeForm({
         pickupContactName,
         pickupContactPhone,
         dueDate,
+        isRush,
         items: items.map((it) => ({
           garmentType: it.garmentType,
           description: it.description,
@@ -206,6 +208,15 @@ export default function IntakeForm({
             onChange={setPickupContactPhone}
           />
         </div>
+        <label className="mt-4 flex items-center gap-2 text-sm text-charcoal/70">
+          <input
+            type="checkbox"
+            checked={isRush}
+            onChange={(e) => setIsRush(e.target.checked)}
+            className="focus-ring h-4 w-4 rounded border-linen"
+          />
+          Rush order
+        </label>
       </section>
 
       <section className="space-y-4">

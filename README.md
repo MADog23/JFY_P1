@@ -41,6 +41,15 @@ styled with Tailwind, deployed on **Railway**.
   ticket is created, the itemized breakdown becomes **manager-only** for both editing
   and *viewing* — employees still see the order's running total and payment status, but
   never the line-by-line breakdown. See "Itemized pricing" below for the full rule set.
+- **Per-item work assignment**: any employee can "pick up" (claim) an unassigned item to
+  work on, and a manager can assign or reassign any item to any active staff member —
+  both are per-item, so different pieces of the same order can be worked by different
+  people at once (e.g. one employee on the jacket, another on the trousers). This is
+  **informational only** — it labels who's responsible, it does not gate who can
+  actually change an item's status. See "Item assignments" below.
+- **Rush orders**: an optional "Rush" flag set at intake (or later, by a manager) shows
+  a small badge on the order everywhere it's listed, and rolls up into a "rush order
+  share" stat in analytics.
 
 ## Explicit assumptions / product decisions made along the way
 
@@ -68,6 +77,13 @@ conservative/self-reliant choice — flag anything you want changed:
   due date — "show me everything that came in during this window," not "what's promised
   this week." If you'd rather it (also) filter by due date, that's a small change to
   `listOrders` in `actions/orders.ts` plus a second toggle in `OrderSearchBar.tsx`.
+- **Assignment is informational, not enforced**: claiming or being assigned an item does
+  not lock other staff out of updating it — the shared-tablet workflow (anyone at the
+  counter can move any item forward) still works exactly as before. Assignment is purely
+  a "who's on this" label: it drives the "Assigned to me" dashboard filter and the team
+  activity breakdown in analytics, nothing else. If you'd rather enforce it later (e.g.
+  block `setItemStatus` unless `assignedToId` matches the caller, or is unset), that
+  check would go at the top of `setItemStatus` in `actions/items.ts`.
 
 ## Itemized pricing
 
@@ -110,6 +126,67 @@ Added after the initial Phase 1 build, on top of the original "no pricing" decis
   `Order.totalPriceCents`); `lib/money.ts` has the only formatting/parsing helpers
   (`formatCents`, `parseDollarsToCents`) — nothing else should touch a raw dollar float.
 
+## Item assignments
+
+Added alongside the historical analytics below, on the flexible shared-tablet workflow
+the shop already uses.
+
+- **Entry points**: on any workable (not-yet-completed) item, unassigned items show a
+  "Pick up this item" button — available to any signed-in employee or manager, no
+  approval needed. Once claimed, the assignee (or a manager) can "Release" it back to
+  unassigned. A manager also gets an "Assign… / Reassign…" control that opens a picker
+  of active staff (both roles) and can hand the item to anyone, including someone else's
+  claim. All three actions (`claimItem`, `assignItem`, `releaseItem` in
+  `actions/items.ts`) are audit-logged (`ITEM_ASSIGNED` / `ITEM_UNASSIGNED`) and record
+  `assignedAt`; `assignItem` is manager-only, `claimItem`/`releaseItem` are open to
+  either role (an employee can only release their own claim; a manager can release
+  anyone's).
+- **Visibility**: who an item is assigned to is visible to both employees and managers
+  on the order profile (unlike itemized pricing, this is not redacted for employees) —
+  everyone at the counter can see who's working what. It's never shown on the public
+  client tracking link.
+- **Informational only**: see the assumptions list above — this does not restrict who
+  can change an item's status.
+- **"Assigned to me" filter**: both dashboards (`/employee`, `/manager`) have an
+  "Assigned to me" toggle pill next to the status tabs, filtering to orders with at
+  least one item assigned to the signed-in user. It stacks with search and the status
+  tabs, and (like search) lives in the URL query string.
+- **Cycle-time tracking**: a new `OrderItem.startedAt` timestamp is set once, the first
+  time an item moves Not started → In progress (never overwritten if it's later reopened
+  and restarted) — this is what powers the "avg. days to start work" analytics stat.
+
+## Historical performance analytics
+
+Added on top of the original analytics page — see "Itemized pricing → Analytics" above
+for the pricing-specific breakdowns; this section covers the operational/historical side.
+All of it lives in the new block at the bottom of `getAnalytics()` in
+`actions/analytics.ts`, and renders in a new "Historical performance" section on the
+manager analytics page.
+
+- **Revenue & volume trend**: a 6-month bar chart of ticket count and revenue, bucketed
+  by intake (`Order.createdAt`) month.
+- **Turnaround trend**: on the same 6-month chart, average days from intake to sealing
+  (`Order.sealedAt`), bucketed by the month the order *sealed* — a different date axis
+  than the bars above it, deliberately, since "how fast are we finishing orders that
+  complete this month" and "how much came in this month" are different questions merged
+  into one chart for space.
+- **On-time completion rate**: % of orders with a due date that sealed on or before it.
+- **Avg. pickup lag**: average days between an item completing and being picked up.
+- **Reopen rate**: % of items that were ever reopened after being marked complete —
+  a rough proxy for rework/mistakes. Flagged in the UI if it climbs above 15%.
+- **Avg. days to full payment**: average days from intake to the order's payment status
+  being set to Paid, for orders currently Paid. This one is inherently a little fragile —
+  there's no structured "payment changed" table, so it works by pattern-matching the
+  audit log's summary text for `updatePaymentStatus`'s "set to PAID by" wording. If that
+  summary template ever changes, this stat silently goes to zero rather than erroring;
+  worth a quick sanity check after any edit to `updatePaymentStatus` in `actions/orders.ts`.
+- **Rush order share**: % of all orders flagged Rush at intake (or since).
+- **Avg. days to start work**: average gap between intake and the first item actually
+  being started (`OrderItem.startedAt`, described above).
+- **Team activity**: a per-staff table — tickets created, items completed, pickups
+  authorized, and items currently assigned — limited to currently-active staff (someone
+  deactivated from Staff drops off the table, even if they have historical activity).
+
 ## Project structure
 
 ```
@@ -127,6 +204,7 @@ lib/                      DB client, auth/session, audit log, order numbering,
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
   PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
   OrderSearchBar.tsx         Client + date-range search box for the employee/manager order lists
+  ItemCard.tsx                Includes the ItemAssignment control (claim / assign / release)
 prisma/schema.prisma      Full data model
 prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`)
 prisma/seed.ts            Creates first manager login + default taxonomy
@@ -149,6 +227,10 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Enter itemized pricing **at intake creation only**    |   Yes    |   Yes   |
 | View / edit itemized pricing **after** intake exists  |    No    |   Yes   |
 | View order total & payment status                     |   Yes    |   Yes   |
+| Claim an unassigned item / release own claim           |   Yes    |   Yes   |
+| Assign or reassign an item to any staff member         |    No    |   Yes   |
+| Release another staff member's claim                   |    No    |   Yes   |
+| Flag an order as Rush                                  |   Yes    |   Yes   |
 
 ## Running locally
 

@@ -69,6 +69,8 @@ model User {
   auditLogs       AuditLog[]
   priceLinesCreated PriceLine[]  @relation("PriceLineCreatedBy")
   priceLinesUpdated PriceLine[]  @relation("PriceLineUpdatedBy")
+  itemsAssignedToMe OrderItem[]  @relation("ItemAssignedTo")
+  itemsAssignedByMe OrderItem[]  @relation("ItemAssignedBy")
 }
 
 model Order {
@@ -86,6 +88,12 @@ model Order {
   generalNotes  String?       @db.Text // working-profile-level, employee or manager editable
   status        OrderStatus   @default(IN_PROGRESS)
   paymentStatus PaymentStatus @default(UNPAID)
+
+  // Structured rush flag — set at intake (either role) or edited afterward like the
+  // other intake-classification fields (manager only, via updateOrderIntake). Exists
+  // so "what share of business is rush work" is a real, countable query instead of
+  // grepping freeform price-line text for the word "rush".
+  isRush Boolean @default(false)
 
   // Denormalized sum of every PriceLine on this order (item-level + order-level),
   // recomputed by lib/pricing.ts any time a line is added/edited/removed. This field
@@ -128,10 +136,28 @@ model OrderItem {
   alterationsCustom String? // free-text extra instructions
 
   status       ItemStatus @default(PENDING)
+  // Set once, the first time this item moves PENDING -> IN_PROGRESS (see
+  // actions/items.ts:setItemStatus) — never overwritten by a later reopen, so it
+  // answers "how long before anyone touched this" (intake -> first work), not "when
+  // was work last resumed." Nullable because items created before this field existed
+  // (and any item never yet started) have no value here.
+  startedAt     DateTime?
   completedAt   DateTime?
   completedById String?
   reopenedAt    DateTime?
   reopenedById  String?
+
+  // Per-item work assignment — informational only (see actions/items.ts): it labels
+  // who's responsible for this item and feeds the workload analytics, but does NOT
+  // gate who can change its status. assignedById records who made the assignment
+  // (equals assignedToId for a self-claim, or a manager's id for a manager assignment
+  // or reassignment) — assignedToId alone can't tell those apart. Both cleared back to
+  // null on release, same as any other "undo" in this app leaves no dangling state.
+  assignedToId String?
+  assignedTo   User?     @relation("ItemAssignedTo", fields: [assignedToId], references: [id])
+  assignedById String?
+  assignedBy   User?     @relation("ItemAssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -144,6 +170,7 @@ model OrderItem {
 
   @@index([orderId])
   @@index([status])
+  @@index([assignedToId])
 }
 
 // Append-only working-profile notes. Never edited or deleted, only added to,

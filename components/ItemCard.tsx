@@ -12,6 +12,9 @@ import {
   authorizeItemPickup,
   undoItemPickup,
   updateItemIntake,
+  claimItem,
+  assignItem,
+  releaseItem,
 } from "@/actions/items";
 import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
 import { formatCents } from "@/lib/money";
@@ -21,11 +24,15 @@ export default function ItemCard({
   role,
   garmentTypes,
   alterationTypes,
+  staff,
+  currentUserId,
 }: {
   item: any;
   role: "EMPLOYEE" | "MANAGER";
   garmentTypes: string[];
   alterationTypes: string[];
+  staff?: { id: string; name: string }[];
+  currentUserId: string;
 }) {
   const [isPending, startTransition] = useTransition();
   const [noteText, setNoteText] = useState("");
@@ -62,6 +69,8 @@ export default function ItemCard({
         </div>
         <StatusBadge status={item.status} kind="item" />
       </div>
+
+      <ItemAssignment item={item} role={role} staff={staff} currentUserId={currentUserId} />
 
       {error && <p className="mb-3 text-sm text-alert">{error}</p>}
 
@@ -466,6 +475,130 @@ function MeasurementRow({ measurement }: { measurement: any }) {
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Assignment is informational only (see actions/items.ts) — it labels who's
+ * responsible for this item and feeds the workload analytics, but never restricts who
+ * can actually start/complete it. Any employee or manager can "pick up" (self-claim)
+ * an unassigned, not-yet-done item; only a manager can assign/reassign to someone
+ * else. Hidden entirely once the item is done (completed/picked up) and was never
+ * assigned — nothing useful to show at that point.
+ */
+function ItemAssignment({
+  item,
+  role,
+  staff,
+  currentUserId,
+}: {
+  item: any;
+  role: "EMPLOYEE" | "MANAGER";
+  staff?: { id: string; name: string }[];
+  currentUserId: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
+  const [pickedStaffId, setPickedStaffId] = useState("");
+
+  const workable = item.status === "PENDING" || item.status === "IN_PROGRESS";
+  if (!workable && !item.assignedTo) return null;
+
+  function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setError(null);
+    startTransition(async () => {
+      const result = await fn();
+      if (!result.ok) setError(result.error || "Something went wrong.");
+    });
+  }
+
+  const canRelease = workable && item.assignedToId && (role === "MANAGER" || item.assignedToId === currentUserId);
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+      {item.assignedTo ? (
+        <span className="rounded-full border border-linen bg-cream px-3 py-1 text-charcoal/70">
+          Assigned to <span className="font-medium text-ink">{item.assignedTo.name}</span>
+        </span>
+      ) : workable ? (
+        <span className="rounded-full border border-dashed border-linen px-3 py-1 text-charcoal/40">
+          Unassigned
+        </span>
+      ) : null}
+
+      {error && <span className="text-xs text-alert">{error}</span>}
+
+      {workable && !item.assignedTo && (
+        <button
+          disabled={isPending}
+          onClick={() => run(() => claimItem(item.id))}
+          className="focus-ring rounded-lg border border-linen bg-white px-2.5 py-1 text-xs text-thread hover:bg-linen"
+        >
+          Pick up this item
+        </button>
+      )}
+
+      {canRelease && (
+        <button
+          disabled={isPending}
+          onClick={() => run(() => releaseItem(item.id))}
+          className="focus-ring rounded-lg border border-linen bg-white px-2.5 py-1 text-xs text-charcoal/60 hover:bg-cream"
+        >
+          Release
+        </button>
+      )}
+
+      {workable && role === "MANAGER" && staff && staff.length > 0 && (
+        <>
+          {!showAssignPicker ? (
+            <button
+              onClick={() => {
+                setPickedStaffId(item.assignedToId || "");
+                setShowAssignPicker(true);
+              }}
+              className="focus-ring rounded-lg border border-linen bg-white px-2.5 py-1 text-xs text-charcoal/60 hover:bg-cream"
+            >
+              {item.assignedTo ? "Reassign…" : "Assign…"}
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <select
+                value={pickedStaffId}
+                onChange={(e) => setPickedStaffId(e.target.value)}
+                className="focus-ring rounded-lg border border-linen bg-white px-2 py-1 text-xs"
+              >
+                <option value="">Select…</option>
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                disabled={isPending || !pickedStaffId}
+                onClick={() =>
+                  run(async () => {
+                    const r = await assignItem(item.id, pickedStaffId);
+                    if (r.ok) setShowAssignPicker(false);
+                    return r;
+                  })
+                }
+                className="focus-ring rounded-lg bg-ink px-2.5 py-1 text-xs text-cream disabled:opacity-40"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setShowAssignPicker(false)}
+                className="focus-ring rounded-lg border border-linen px-2.5 py-1 text-xs text-charcoal/60"
+              >
+                Cancel
+              </button>
+            </span>
+          )}
+        </>
+      )}
     </div>
   );
 }

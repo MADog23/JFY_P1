@@ -28,6 +28,16 @@ export async function listManagers() {
   });
 }
 
+/** MANAGER ONLY: active employees + managers, for the item-assignment picker. */
+export async function listAssignableStaff() {
+  await requireManager();
+  return db.user.findMany({
+    where: { active: true },
+    select: { id: true, name: true, role: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function createEmployee(name: string, pin: string): Promise<ActionResult> {
   const session = await requireManager();
   if (!name.trim()) return { ok: false, error: "Name is required." };

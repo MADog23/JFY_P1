@@ -26,6 +26,7 @@ export default async function EmployeeOrderPage({ params }: { params: { id: stri
           garmentTypes={garmentTypes.map((g) => g.label)}
           alterationTypes={alterationTypes.map((a) => a.label)}
           trackingUrl={trackingUrl}
+          currentUserId={session.userId}
         />
       </main>
     </>

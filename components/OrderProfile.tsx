@@ -19,12 +19,16 @@ export default function OrderProfile({
   garmentTypes,
   alterationTypes,
   trackingUrl,
+  staff,
+  currentUserId,
 }: {
   order: any;
   role: "EMPLOYEE" | "MANAGER";
   garmentTypes: string[];
   alterationTypes: string[];
   trackingUrl: string;
+  staff?: { id: string; name: string }[];
+  currentUserId: string;
 }) {
   return (
     <div className="space-y-6">
@@ -38,7 +42,15 @@ export default function OrderProfile({
         </div>
         <div className="space-y-4">
           {order.items.map((item: any) => (
-            <ItemCard key={item.id} item={item} role={role} garmentTypes={garmentTypes} alterationTypes={alterationTypes} />
+            <ItemCard
+              key={item.id}
+              item={item}
+              role={role}
+              garmentTypes={garmentTypes}
+              alterationTypes={alterationTypes}
+              staff={staff}
+              currentUserId={currentUserId}
+            />
           ))}
         </div>
         {role === "MANAGER" && (
@@ -62,7 +74,14 @@ function OrderHeader({ order, role, trackingUrl }: { order: any; role: "EMPLOYEE
           <p className="text-xs uppercase tracking-wide text-charcoal/50">{order.orderNumber}</p>
           <h1 className="font-display text-2xl text-ink">{order.clientName}</h1>
         </div>
-        <StatusBadge status={order.status} kind="order" />
+        <div className="flex items-center gap-2">
+          {order.isRush && (
+            <span className="rounded-full border border-alert/40 bg-alert/10 px-2.5 py-1 text-xs font-medium text-alert">
+              Rush
+            </span>
+          )}
+          <StatusBadge status={order.status} kind="order" />
+        </div>
       </div>
 
       {!editing ? (
@@ -119,6 +138,7 @@ function IntakeEditor({ order, onDone }: { order: any; onDone: () => void }) {
   const [pickupContactName, setPickupContactName] = useState(order.pickupContactName || "");
   const [pickupContactPhone, setPickupContactPhone] = useState(order.pickupContactPhone || "");
   const [dueDate, setDueDate] = useState(order.dueDate ? order.dueDate.slice(0, 10) : "");
+  const [isRush, setIsRush] = useState(!!order.isRush);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -133,6 +153,15 @@ function IntakeEditor({ order, onDone }: { order: any; onDone: () => void }) {
         <LabeledInput label="Pickup contact name" value={pickupContactName} onChange={setPickupContactName} />
         <LabeledInput label="Pickup contact phone" value={pickupContactPhone} onChange={setPickupContactPhone} />
       </div>
+      <label className="mt-3 flex items-center gap-2 text-sm text-charcoal/70">
+        <input
+          type="checkbox"
+          checked={isRush}
+          onChange={(e) => setIsRush(e.target.checked)}
+          className="focus-ring h-4 w-4 rounded border-linen"
+        />
+        Rush order
+      </label>
       <div className="mt-3 flex gap-2">
         <button
           disabled={isPending}
@@ -146,6 +175,7 @@ function IntakeEditor({ order, onDone }: { order: any; onDone: () => void }) {
                 pickupContactName,
                 pickupContactPhone,
                 dueDate,
+                isRush,
               });
               if (r.ok) onDone();
               else setError(r.error || "Could not save.");

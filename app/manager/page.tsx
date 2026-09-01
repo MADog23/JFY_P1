@@ -8,13 +8,14 @@ import { OrderSearchBar } from "@/components/OrderSearchBar";
 export default async function ManagerDashboard({
   searchParams,
 }: {
-  searchParams: { filter?: string; search?: string; from?: string; to?: string };
+  searchParams: { filter?: string; search?: string; from?: string; to?: string; mine?: string };
 }) {
   const session = await requireManager();
   const filter = (searchParams.filter as any) || "ACTIVE";
   const { search, from, to } = searchParams;
-  const orders = await listOrders({ filter, search, from, to });
-  const hasSearch = !!(search || from || to);
+  const mine = searchParams.mine === "1";
+  const orders = await listOrders({ filter, search, from, to, assignedToId: mine ? session.userId : undefined });
+  const hasSearch = !!(search || from || to || mine);
 
   function tabHref(value: string) {
     const params = new URLSearchParams();
@@ -22,6 +23,17 @@ export default async function ManagerDashboard({
     if (search) params.set("search", search);
     if (from) params.set("from", from);
     if (to) params.set("to", to);
+    if (mine) params.set("mine", "1");
+    return `/manager?${params.toString()}`;
+  }
+
+  function mineHref() {
+    const params = new URLSearchParams();
+    params.set("filter", filter);
+    if (search) params.set("search", search);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (!mine) params.set("mine", "1");
     return `/manager?${params.toString()}`;
   }
 
@@ -63,12 +75,28 @@ export default async function ManagerDashboard({
               {label}
             </Link>
           ))}
+          <Link
+            href={mineHref()}
+            className={`ml-auto rounded-full border px-3 py-1.5 ${
+              mine
+                ? "border-thread bg-thread text-cream"
+                : "border-linen bg-white text-charcoal/60 hover:border-thread/50"
+            }`}
+          >
+            Assigned to me
+          </Link>
         </div>
 
         <OrderList
           orders={orders as any}
           basePath="/manager"
-          emptyMessage={hasSearch ? "No orders match your search." : "No orders here yet."}
+          emptyMessage={
+            mine
+              ? "Nothing assigned to you right now."
+              : hasSearch
+              ? "No orders match your search."
+              : "No orders here yet."
+          }
         />
       </main>
     </>

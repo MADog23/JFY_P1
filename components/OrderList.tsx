@@ -7,8 +7,17 @@ type OrderRow = {
   clientName: string;
   status: string;
   dueDate: Date | null;
+  isRush?: boolean;
   items: { status: string }[];
 };
+
+function RushBadge() {
+  return (
+    <span className="rounded-full border border-alert/40 bg-alert/10 px-2 py-0.5 text-[11px] font-medium text-alert">
+      Rush
+    </span>
+  );
+}
 
 export function OrderList({
   orders,
@@ -43,7 +52,10 @@ export function OrderList({
             className="focus-ring block rounded-2xl border border-linen bg-white p-4"
           >
             <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="font-medium text-thread">{order.orderNumber}</span>
+              <span className="flex items-center gap-1.5 font-medium text-thread">
+                {order.orderNumber}
+                {order.isRush && <RushBadge />}
+              </span>
               <StatusBadge status={order.status} kind="order" />
             </div>
             <p className="mb-2 text-ink">{order.clientName}</p>
@@ -73,8 +85,12 @@ export function OrderList({
             {rows.map((order) => (
               <tr key={order.id} className="border-b border-linen last:border-0 hover:bg-cream">
                 <td className="px-4 py-3">
-                  <Link href={`${basePath}/orders/${order.id}`} className="font-medium text-thread hover:underline">
+                  <Link
+                    href={`${basePath}/orders/${order.id}`}
+                    className="flex items-center gap-1.5 font-medium text-thread hover:underline"
+                  >
                     {order.orderNumber}
+                    {order.isRush && <RushBadge />}
                   </Link>
                 </td>
                 <td className="px-4 py-3">{order.clientName}</td>

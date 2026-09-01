@@ -109,6 +109,9 @@ export async function setItemStatus(
         status,
         completedAt: status === "COMPLETED" ? new Date() : null,
         completedById: status === "COMPLETED" ? session.userId : null,
+        // First time this item is actually started, for cycle-time analytics — never
+        // overwritten on a later reopen (that's a resumption, not a first start).
+        ...(status === "IN_PROGRESS" && !item.startedAt ? { startedAt: new Date() } : {}),
       },
     });
     await recomputeOrderStatus(item.orderId, tx);
@@ -356,6 +359,104 @@ export async function undoItemPickup(itemId: string): Promise<ActionResult> {
     entityId: itemId,
     action: "PICKUP_UNDONE",
     summary: `Pickup of "${item.description}" (was picked up by ${wasPickedUpBy}) undone by ${session.name}. Item is back to completed.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
+/**
+ * ASSIGNMENT — informational only. This labels who's responsible for an item (for
+ * accountability and the workload analytics) but never gates who can start/complete
+ * it — setItemStatus/reopenItem/authorizeItemPickup all still accept any signed-in
+ * employee or manager regardless of assignedToId, unchanged. Three entry points:
+ *   - claimItem:   employee or manager, self-assign, only if currently unassigned
+ *   - assignItem:  MANAGER ONLY, assign/reassign to any active staff member
+ *   - releaseItem: the assignee themselves, or any manager, clears the assignment
+ */
+
+/** Employee or manager: claims an unassigned item for themselves. */
+export async function claimItem(itemId: string): Promise<ActionResult> {
+  const session = await requireSession();
+  const item = await db.orderItem.findUnique({ where: { id: itemId } });
+  if (!item) return { ok: false, error: "Item not found." };
+  if (item.status === "COMPLETED" || item.status === "PICKED_UP") {
+    return { ok: false, error: "This item is already done — nothing to pick up." };
+  }
+  if (item.assignedToId) {
+    return { ok: false, error: "This item is already assigned to someone else." };
+  }
+
+  await db.orderItem.update({
+    where: { id: itemId },
+    data: { assignedToId: session.userId, assignedById: session.userId, assignedAt: new Date() },
+  });
+
+  await logAudit({
+    orderId: item.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: itemId,
+    action: "ITEM_ASSIGNED",
+    summary: `"${item.description}" picked up by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
+/** MANAGER ONLY: assigns (or reassigns) an item to a specific active employee or manager. */
+export async function assignItem(itemId: string, assigneeId: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const item = await db.orderItem.findUnique({ where: { id: itemId } });
+  if (!item) return { ok: false, error: "Item not found." };
+  if (item.status === "COMPLETED" || item.status === "PICKED_UP") {
+    return { ok: false, error: "This item is already done — nothing to assign." };
+  }
+
+  const assignee = await db.user.findUnique({ where: { id: assigneeId } });
+  if (!assignee || !assignee.active) return { ok: false, error: "That staff member isn't available." };
+
+  await db.orderItem.update({
+    where: { id: itemId },
+    data: { assignedToId: assignee.id, assignedById: session.userId, assignedAt: new Date() },
+  });
+
+  await logAudit({
+    orderId: item.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: itemId,
+    action: "ITEM_ASSIGNED",
+    summary: `"${item.description}" assigned to ${assignee.name} by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
+/** The current assignee, or any manager: clears an item's assignment. */
+export async function releaseItem(itemId: string): Promise<ActionResult> {
+  const session = await requireSession();
+  const item = await db.orderItem.findUnique({ where: { id: itemId } });
+  if (!item) return { ok: false, error: "Item not found." };
+  if (!item.assignedToId) return { ok: false, error: "This item isn't assigned to anyone." };
+  if (session.role !== "MANAGER" && item.assignedToId !== session.userId) {
+    return { ok: false, error: "You can only release items assigned to you." };
+  }
+
+  await db.orderItem.update({
+    where: { id: itemId },
+    data: { assignedToId: null, assignedById: null, assignedAt: null },
+  });
+
+  await logAudit({
+    orderId: item.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: itemId,
+    action: "ITEM_UNASSIGNED",
+    summary: `Assignment on "${item.description}" cleared by ${session.name}.`,
     performedById: session.userId,
   });
 

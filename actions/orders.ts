@@ -114,14 +114,17 @@ export async function createIntakeTicket(
       include: { items: true },
     });
 
-    await logAudit({
-      orderId: created.id,
-      entityType: "ORDER",
-      entityId: created.id,
-      action: "INTAKE_CREATED",
-      summary: `Intake ticket ${created.orderNumber} created for ${created.clientName} with ${created.items.length} item(s) by ${session.name}.`,
-      performedById: session.userId,
-    });
+    await logAudit(
+      {
+        orderId: created.id,
+        entityType: "ORDER",
+        entityId: created.id,
+        action: "INTAKE_CREATED",
+        summary: `Intake ticket ${created.orderNumber} created for ${created.clientName} with ${created.items.length} item(s) by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
 
     return created;
   });

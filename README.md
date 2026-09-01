@@ -83,8 +83,9 @@ Added after the initial Phase 1 build, on top of the original "no pricing" decis
   (from `Order.totalPriceCents`), plus four breakdowns built from the itemized price
   lines themselves: revenue by alteration type, revenue by garment type, a revenue
   composition split (standard alterations / custom instructions / freeform write-ins),
-  and a "needs a pricing pass" list of open orders where a checked alteration still has
-  no price line. The alteration and garment breakdowns only work because
+  and an "Unpriced alterations" count — the literal number of checked alterations on
+  open tickets that still have no price line, shown as a total and broken out per
+  order (e.g. "3 unpriced") rather than an unexplained per-order flag. The alteration and garment breakdowns only work because
   `PriceLine.description` is a controlled vocabulary for `ALTERATION`-sourced rows
   (always the exact taxonomy label, never free text) — freeform write-ins have no such
   structure, which is why they stay lumped into one bucket in the composition split

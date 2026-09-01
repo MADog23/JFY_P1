@@ -58,7 +58,7 @@ export default async function AnalyticsPage() {
               FREEFORM: "Write-in charges",
             }}
           />
-          <NeedsPricingCard orders={stats.needsPricing} />
+          <NeedsPricingCard orders={stats.needsPricing} totalGaps={stats.totalPricingGaps} />
         </div>
 
         <div className="grid gap-6 sm:grid-cols-2">
@@ -155,25 +155,37 @@ function MoneyBreakdownCard({
   );
 }
 
-function NeedsPricingCard({ orders }: { orders: { id: string; orderNumber: string; clientName: string }[] }) {
+function NeedsPricingCard({
+  orders,
+  totalGaps,
+}: {
+  orders: { id: string; orderNumber: string; clientName: string; gaps: number }[];
+  totalGaps: number;
+}) {
   return (
     <div className="rounded-2xl border border-linen bg-white p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-medium text-ink">Needs a pricing pass</p>
-        <span className={`font-display text-2xl ${orders.length > 0 ? "text-alert" : "text-ink"}`}>{orders.length}</span>
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-sm font-medium text-ink">Unpriced alterations</p>
+        <span className={`font-display text-2xl ${totalGaps > 0 ? "text-alert" : "text-ink"}`}>{totalGaps}</span>
       </div>
+      <p className="mb-3 text-[11px] text-charcoal/40">
+        Checked alterations on open tickets with no price entered yet.
+      </p>
       {orders.length === 0 ? (
-        <p className="text-sm text-charcoal/40">Every open ticket has pricing entered for each selected alteration.</p>
+        <p className="text-sm text-charcoal/40">Every open ticket is fully priced.</p>
       ) : (
         <ul className="space-y-1.5">
           {orders.slice(0, 6).map((o) => (
-            <li key={o.id}>
+            <li key={o.id} className="flex items-center justify-between gap-3">
               <Link href={`/manager/orders/${o.id}`} className="text-sm text-thread hover:underline">
                 {o.orderNumber} — {o.clientName}
               </Link>
+              <span className="whitespace-nowrap text-xs text-charcoal/50">
+                {o.gaps} unpriced
+              </span>
             </li>
           ))}
-          {orders.length > 6 && <li className="text-xs text-charcoal/40">+{orders.length - 6} more</li>}
+          {orders.length > 6 && <li className="text-xs text-charcoal/40">+{orders.length - 6} more orders</li>}
         </ul>
       )}
     </div>

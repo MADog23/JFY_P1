@@ -96,9 +96,22 @@ export async function getAnalytics() {
     .map(([label, v]) => ({ label, totalCents: v.totalCents, count: v.count }))
     .sort((a, b) => b.totalCents - a.totalCents);
 
+  // Literal, self-evident metric: for each open order, count the individual
+  // checked alterations that still have no ALTERATION-sourced price line — not
+  // an abstract "needs attention" flag. An order with 3 alterations and 2 price
+  // lines has exactly 1 gap; an order with equal or more price lines has 0.
   const needsPricing = inProgressOrders
-    .filter((o) => o.items.some((item) => item.alterations.length > item.priceLines.length))
-    .map((o) => ({ id: o.id, orderNumber: o.orderNumber, clientName: o.clientName }));
+    .map((o) => {
+      const gaps = o.items.reduce(
+        (sum, item) => sum + Math.max(0, item.alterations.length - item.priceLines.length),
+        0,
+      );
+      return { id: o.id, orderNumber: o.orderNumber, clientName: o.clientName, gaps };
+    })
+    .filter((o) => o.gaps > 0)
+    .sort((a, b) => b.gaps - a.gaps);
+
+  const totalPricingGaps = needsPricing.reduce((sum, o) => sum + o.gaps, 0);
 
   return {
     totalOrders,
@@ -113,5 +126,6 @@ export async function getAnalytics() {
     revenueByGarmentType,
     revenueBySource: sourceTotals,
     needsPricing,
+    totalPricingGaps,
   };
 }

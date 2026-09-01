@@ -1,0 +1,219 @@
+// Just For You Alterations — Phase 1 digital ticket system
+// Data model notes:
+// - Every mutating action is expected to also write an AuditLog row (see lib/audit.ts)
+// - OrderItem "intake" fields (garmentType, description, alterations) are locked after
+//   creation and can only be changed by a MANAGER (see actions/items.ts)
+// - Order.status / OrderItem.status are recomputed by lib/order-status.ts, not set by hand,
+//   so the "sealed until a manager reopens" rule can never be bypassed by a stray write.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+}
+
+enum OrderStatus {
+  IN_PROGRESS // at least one item not yet completed
+  SEALED // every item COMPLETED (or PICKED_UP) — read-only until a manager reopens an item
+  PICKED_UP // every item has been picked up — order fully closed
+}
+
+enum PaymentStatus {
+  UNPAID
+  DEPOSIT_PAID
+  PAID
+}
+
+enum ItemStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED // locked — only a manager can reopen
+  PICKED_UP // locked — terminal
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  role      Role
+  active    Boolean  @default(true)
+
+  // Employees authenticate with a PIN (hashed). Managers authenticate with email + password.
+  pinHash      String?
+  email        String?  @unique
+  passwordHash String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ordersCreated   Order[]        @relation("OrderCreatedBy")
+  notes           ItemNote[]
+  measurements    ItemMeasurement[]
+  images          ItemImage[]
+  pickupsHandled  ItemPickup[]   @relation("PickupAuthorizedBy")
+  auditLogs       AuditLog[]
+}
+
+model Order {
+  id          String        @id @default(cuid())
+  orderNumber String        @unique // e.g. JFY-000123
+
+  // Client / pickup contact identity — intake-level, manager-editable only after creation
+  clientName         String
+  clientPhone        String
+  clientEmail        String?
+  pickupContactName  String?
+  pickupContactPhone String?
+  dueDate            DateTime?
+
+  generalNotes  String?       @db.Text // working-profile-level, employee or manager editable
+  status        OrderStatus   @default(IN_PROGRESS)
+  paymentStatus PaymentStatus @default(UNPAID)
+
+  // Public read-only client link. No expiration by design decision; a manager can
+  // rotate it (see actions/orders.ts:rotateClientToken) as a manual safety valve.
+  clientToken String @unique
+
+  sealedAt   DateTime?
+  sealedById String?
+
+  createdById String
+  createdBy   User   @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items     OrderItem[]
+  auditLogs AuditLog[]
+
+  @@index([status])
+  @@index([clientName])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Intake-level identity fields — locked after creation, manager-editable only
+  garmentType       String
+  description       String
+  alterations       String[] // selected taxonomy labels
+  alterationsCustom String? // free-text extra instructions
+
+  status       ItemStatus @default(PENDING)
+  completedAt   DateTime?
+  completedById String?
+  reopenedAt    DateTime?
+  reopenedById  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notes        ItemNote[]
+  measurements ItemMeasurement[]
+  images       ItemImage[]
+  pickup       ItemPickup?
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// Append-only working-profile notes. Never edited or deleted, only added to,
+// so the log itself is the record of who said what and when.
+model ItemNote {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  body        String    @db.Text
+  createdAt   DateTime  @default(now())
+
+  @@index([orderItemId])
+}
+
+// Flexible key/value so measurement fields can differ by garment type
+// (e.g. "Sleeve length" for a jacket, "Hem to floor" for a gown).
+model ItemMeasurement {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  label       String
+  value       String
+  updatedById String
+  updatedBy   User      @relation(fields: [updatedById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([orderItemId])
+}
+
+// Image capture is a visible placeholder in Phase 1: the record (who, when, caption)
+// is real, but `url` stays null until cloud storage is wired up. See lib/images.ts.
+model ItemImage {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  url         String? // null = placeholder, not yet backed by real storage
+  caption     String?
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@index([orderItemId])
+}
+
+model ItemPickup {
+  id              String    @id @default(cuid())
+  orderItemId     String    @unique
+  orderItem       OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  pickedUpByName  String
+  pickedUpByPhone String?
+  authorizedById  String
+  authorizedBy    User      @relation("PickupAuthorizedBy", fields: [authorizedById], references: [id])
+  pickedUpAt      DateTime  @default(now())
+}
+
+// The accountability trail: every mutation across the system writes one of these.
+model AuditLog {
+  id            String   @id @default(cuid())
+  orderId       String?
+  order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  entityType    String // "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY"
+  entityId      String
+  action        String // e.g. "INTAKE_CREATED", "STATUS_CHANGE", "PICKUP_AUTHORIZED"
+  summary       String
+  performedById String
+  performedBy   User     @relation(fields: [performedById], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@index([orderId])
+  @@index([entityType, entityId])
+}
+
+model GarmentTypeOption {
+  id     String  @id @default(cuid())
+  label  String  @unique
+  active Boolean @default(true)
+  sortOrder Int  @default(0)
+}
+
+model AlterationTypeOption {
+  id     String  @id @default(cuid())
+  label  String  @unique
+  active Boolean @default(true)
+  sortOrder Int  @default(0)
+}
+
+// Singleton row used to hand out sequential, human-readable order numbers.
+model OrderCounter {
+  id         Int @id @default(1)
+  lastNumber Int @default(0)
+}

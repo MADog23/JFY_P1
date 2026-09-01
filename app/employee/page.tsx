@@ -3,15 +3,27 @@ import { requireSession } from "@/lib/auth";
 import { listOrders } from "@/actions/orders";
 import { TopNav } from "@/components/TopNav";
 import { OrderList } from "@/components/OrderList";
+import { OrderSearchBar } from "@/components/OrderSearchBar";
 
 export default async function EmployeeDashboard({
   searchParams,
 }: {
-  searchParams: { filter?: string };
+  searchParams: { filter?: string; search?: string; from?: string; to?: string };
 }) {
   const session = await requireSession();
   const filter = (searchParams.filter as any) || "ACTIVE";
-  const orders = await listOrders(filter);
+  const { search, from, to } = searchParams;
+  const orders = await listOrders({ filter, search, from, to });
+  const hasSearch = !!(search || from || to);
+
+  function tabHref(value: string) {
+    const params = new URLSearchParams();
+    params.set("filter", value);
+    if (search) params.set("search", search);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    return `/employee?${params.toString()}`;
+  }
 
   return (
     <>
@@ -30,6 +42,8 @@ export default async function EmployeeDashboard({
           </Link>
         </div>
 
+        <OrderSearchBar />
+
         <div className="mb-4 flex gap-2 text-sm">
           {[
             ["ACTIVE", "In progress"],
@@ -39,7 +53,7 @@ export default async function EmployeeDashboard({
           ].map(([value, label]) => (
             <Link
               key={value}
-              href={`/employee?filter=${value}`}
+              href={tabHref(value)}
               className={`rounded-full border px-3 py-1.5 ${
                 filter === value
                   ? "border-thread bg-thread text-cream"
@@ -51,7 +65,11 @@ export default async function EmployeeDashboard({
           ))}
         </div>
 
-        <OrderList orders={orders as any} basePath="/employee" />
+        <OrderList
+          orders={orders as any}
+          basePath="/employee"
+          emptyMessage={hasSearch ? "No orders match your search." : "No orders here yet."}
+        />
       </main>
     </>
   );

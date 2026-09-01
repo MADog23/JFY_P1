@@ -3,15 +3,27 @@ import { requireManager } from "@/lib/auth";
 import { listOrders } from "@/actions/orders";
 import { TopNav } from "@/components/TopNav";
 import { OrderList } from "@/components/OrderList";
+import { OrderSearchBar } from "@/components/OrderSearchBar";
 
 export default async function ManagerDashboard({
   searchParams,
 }: {
-  searchParams: { filter?: string };
+  searchParams: { filter?: string; search?: string; from?: string; to?: string };
 }) {
   const session = await requireManager();
   const filter = (searchParams.filter as any) || "ACTIVE";
-  const orders = await listOrders(filter);
+  const { search, from, to } = searchParams;
+  const orders = await listOrders({ filter, search, from, to });
+  const hasSearch = !!(search || from || to);
+
+  function tabHref(value: string) {
+    const params = new URLSearchParams();
+    params.set("filter", value);
+    if (search) params.set("search", search);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    return `/manager?${params.toString()}`;
+  }
 
   return (
     <>
@@ -30,6 +42,8 @@ export default async function ManagerDashboard({
           </Link>
         </div>
 
+        <OrderSearchBar />
+
         <div className="mb-4 flex gap-2 text-sm">
           {[
             ["ACTIVE", "In progress"],
@@ -39,7 +53,7 @@ export default async function ManagerDashboard({
           ].map(([value, label]) => (
             <Link
               key={value}
-              href={`/manager?filter=${value}`}
+              href={tabHref(value)}
               className={`rounded-full border px-3 py-1.5 ${
                 filter === value
                   ? "border-thread bg-thread text-cream"
@@ -51,7 +65,11 @@ export default async function ManagerDashboard({
           ))}
         </div>
 
-        <OrderList orders={orders as any} basePath="/manager" />
+        <OrderList
+          orders={orders as any}
+          basePath="/manager"
+          emptyMessage={hasSearch ? "No orders match your search." : "No orders here yet."}
+        />
       </main>
     </>
   );

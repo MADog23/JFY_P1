@@ -12,9 +12,26 @@ import { generateClientToken } from "@/lib/token";
 import { recomputeOrderTotal } from "@/lib/pricing";
 import type { ActionResult } from "./auth";
 
-export async function listOrders(filter?: "ACTIVE" | "SEALED" | "PICKED_UP" | "ALL") {
+export type OrderListFilter = "ACTIVE" | "SEALED" | "PICKED_UP" | "ALL";
+
+/**
+ * `search` matches against everything captured about the client at intake — name,
+ * phone, email, and the (separate) pickup contact's name/phone — plus the order
+ * number itself, since typing a ticket number into the same box is the natural thing
+ * to try. `from`/`to` (yyyy-mm-dd, inclusive) filter by the order's *created* date —
+ * i.e. when the intake ticket was made, not the due date — per the product decision
+ * to search "when did this come in" rather than "when is it promised."
+ */
+export async function listOrders(params?: {
+  filter?: OrderListFilter;
+  search?: string;
+  from?: string;
+  to?: string;
+}) {
   await requireSession();
-  const where =
+  const { filter, search, from, to } = params ?? {};
+
+  const statusWhere: Prisma.OrderWhereInput =
     !filter || filter === "ALL"
       ? {}
       : filter === "ACTIVE"
@@ -23,8 +40,27 @@ export async function listOrders(filter?: "ACTIVE" | "SEALED" | "PICKED_UP" | "A
       ? { status: "SEALED" as const }
       : { status: "PICKED_UP" as const };
 
+  const term = search?.trim();
+  const searchWhere: Prisma.OrderWhereInput = term
+    ? {
+        OR: [
+          { clientName: { contains: term, mode: "insensitive" } },
+          { clientPhone: { contains: term, mode: "insensitive" } },
+          { clientEmail: { contains: term, mode: "insensitive" } },
+          { pickupContactName: { contains: term, mode: "insensitive" } },
+          { pickupContactPhone: { contains: term, mode: "insensitive" } },
+          { orderNumber: { contains: term, mode: "insensitive" } },
+        ],
+      }
+    : {};
+
+  const createdAtWhere: Prisma.DateTimeFilter = {};
+  if (from) createdAtWhere.gte = new Date(`${from}T00:00:00`);
+  if (to) createdAtWhere.lte = new Date(`${to}T23:59:59.999`);
+  const dateWhere: Prisma.OrderWhereInput = from || to ? { createdAt: createdAtWhere } : {};
+
   return db.order.findMany({
-    where,
+    where: { ...statusWhere, ...searchWhere, ...dateWhere },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,

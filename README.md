@@ -19,6 +19,12 @@ styled with Tailwind, deployed on **Railway**.
   the original pickup stays visible in the activity log either way).
 - **Order sealing**: once every item on an order is completed, the order auto-seals
   (read-only) until a manager reopens an item.
+- **Order search**: the order list (both employee and manager) can be filtered by a
+  free-text search across everything captured about the client at intake — name, phone,
+  email, pickup contact name/phone — plus the order number itself, combined with a
+  created-date range. Available to both roles, same as the list itself; stacks with the
+  existing status tabs (In progress / Ready for pickup / Picked up / All), and everything
+  lives in the URL's query string so a search is a shareable/bookmarkable link.
 - **Public client tracking link**: a no-login, read-only page showing order/item status
   only — see "Client-view privacy" below for exactly what is and isn't shown.
 - **Full audit trail**: every change anywhere in the system is attributed to the
@@ -58,6 +64,10 @@ conservative/self-reliant choice — flag anything you want changed:
   single, well-commented function: `lib/client-view.ts`.
 - **Multi-manager support**: any manager can create additional manager accounts from the
   Staff page (useful once there's more than one manager/owner).
+- **Order search date range**: filters by when the intake ticket was *created*, not the
+  due date — "show me everything that came in during this window," not "what's promised
+  this week." If you'd rather it (also) filter by due date, that's a small change to
+  `listOrders` in `actions/orders.ts` plus a second toggle in `OrderSearchBar.tsx`.
 
 ## Itemized pricing
 
@@ -116,6 +126,7 @@ lib/                      DB client, auth/session, audit log, order numbering,
   money.ts                   formatCents / parseDollarsToCents — the only place cents<->dollars happens
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
   PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
+  OrderSearchBar.tsx         Client + date-range search box for the employee/manager order lists
 prisma/schema.prisma      Full data model
 prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`)
 prisma/seed.ts            Creates first manager login + default taxonomy

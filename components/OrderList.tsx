@@ -10,11 +10,19 @@ type OrderRow = {
   items: { status: string }[];
 };
 
-export function OrderList({ orders, basePath }: { orders: OrderRow[]; basePath: string }) {
+export function OrderList({
+  orders,
+  basePath,
+  emptyMessage = "No orders here yet.",
+}: {
+  orders: OrderRow[];
+  basePath: string;
+  emptyMessage?: string;
+}) {
   if (orders.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-linen bg-white p-10 text-center text-sm text-charcoal/50">
-        No orders here yet.
+        {emptyMessage}
       </div>
     );
   }

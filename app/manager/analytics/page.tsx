@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireManager } from "@/lib/auth";
 import { getAnalytics } from "@/actions/analytics";
 import { formatCents } from "@/lib/money";
@@ -35,6 +36,31 @@ export default async function AnalyticsPage() {
           Based on itemized pricing entered on each order. Orders with no pricing entered yet count as $0.
         </p>
 
+        <div className="mb-3">
+          <h2 className="font-display text-lg text-ink">Pricing insights</h2>
+          <p className="text-xs text-charcoal/50">
+            Built from the itemized price lines entered on each ticket — alteration and garment-type
+            breakdowns only cover standard pricing, since write-in charges don't have a consistent label
+            to group by.
+          </p>
+        </div>
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
+          <RevenueByLabelCard title="Revenue by alteration" rows={stats.revenueByAlteration} />
+          <RevenueByLabelCard title="Revenue by garment type" rows={stats.revenueByGarmentType} showAvg={false} />
+        </div>
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
+          <MoneyBreakdownCard
+            title="Revenue composition"
+            data={stats.revenueBySource}
+            labels={{
+              ALTERATION: "Standard alterations",
+              CUSTOM_INSTRUCTIONS: "Custom instructions",
+              FREEFORM: "Write-in charges",
+            }}
+          />
+          <NeedsPricingCard orders={stats.needsPricing} />
+        </div>
+
         <div className="grid gap-6 sm:grid-cols-2">
           <BreakdownCard
             title="Orders by status"
@@ -59,6 +85,98 @@ export default async function AnalyticsPage() {
         </div>
       </main>
     </>
+  );
+}
+
+function RevenueByLabelCard({
+  title,
+  rows,
+  showAvg = true,
+}: {
+  title: string;
+  rows: { label: string; totalCents: number; count: number; avgCents?: number }[];
+  showAvg?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-linen bg-white p-5">
+      <p className="mb-3 text-sm font-medium text-ink">{title}</p>
+      {rows.length === 0 ? (
+        <p className="text-sm text-charcoal/40">No pricing entered yet.</p>
+      ) : (
+        <div className="divide-y divide-linen">
+          {rows.slice(0, 8).map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <div>
+                <p className="text-ink">{row.label}</p>
+                <p className="text-[11px] text-charcoal/40">
+                  {row.count}× charged{showAvg && row.avgCents !== undefined ? ` · avg ${formatCents(row.avgCents)}` : ""}
+                </p>
+              </div>
+              <span className="font-display text-base text-ink">{formatCents(row.totalCents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoneyBreakdownCard({
+  title,
+  data,
+  labels,
+}: {
+  title: string;
+  data: Record<string, number>;
+  labels: Record<string, string>;
+}) {
+  const total = Object.values(data).reduce((a, b) => a + b, 0) || 1;
+  return (
+    <div className="rounded-2xl border border-linen bg-white p-5">
+      <p className="mb-3 text-sm font-medium text-ink">{title}</p>
+      <div className="space-y-2">
+        {Object.entries(labels).map(([key, label]) => {
+          const cents = data[key] || 0;
+          const pct = Math.round((cents / total) * 100);
+          return (
+            <div key={key}>
+              <div className="mb-1 flex justify-between text-xs text-charcoal/60">
+                <span>{label}</span>
+                <span>{formatCents(cents)}</span>
+              </div>
+              <div className="h-2 rounded-full bg-linen">
+                <div className="h-2 rounded-full bg-thread" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function NeedsPricingCard({ orders }: { orders: { id: string; orderNumber: string; clientName: string }[] }) {
+  return (
+    <div className="rounded-2xl border border-linen bg-white p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium text-ink">Needs a pricing pass</p>
+        <span className={`font-display text-2xl ${orders.length > 0 ? "text-alert" : "text-ink"}`}>{orders.length}</span>
+      </div>
+      {orders.length === 0 ? (
+        <p className="text-sm text-charcoal/40">Every open ticket has pricing entered for each selected alteration.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {orders.slice(0, 6).map((o) => (
+            <li key={o.id}>
+              <Link href={`/manager/orders/${o.id}`} className="text-sm text-thread hover:underline">
+                {o.orderNumber} — {o.clientName}
+              </Link>
+            </li>
+          ))}
+          {orders.length > 6 && <li className="text-xs text-charcoal/40">+{orders.length - 6} more</li>}
+        </ul>
+      )}
+    </div>
   );
 }
 

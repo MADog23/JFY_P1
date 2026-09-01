@@ -79,9 +79,17 @@ Added after the initial Phase 1 build, on top of the original "no pricing" decis
   denormalized sum, recomputed by `lib/pricing.ts` after every price-line change) and
   `paymentStatus` — enough to answer "how much do I owe" at the counter, but no
   itemized detail and no edit controls.
-- **Analytics**: `actions/analytics.ts` now also returns total revenue and average
-  order value, computed straight from `Order.totalPriceCents` — safe to aggregate raw
-  since that whole action is already manager-gated.
+- **Analytics**: `actions/analytics.ts` returns total revenue and average order value
+  (from `Order.totalPriceCents`), plus four breakdowns built from the itemized price
+  lines themselves: revenue by alteration type, revenue by garment type, a revenue
+  composition split (standard alterations / custom instructions / freeform write-ins),
+  and a "needs a pricing pass" list of open orders where a checked alteration still has
+  no price line. The alteration and garment breakdowns only work because
+  `PriceLine.description` is a controlled vocabulary for `ALTERATION`-sourced rows
+  (always the exact taxonomy label, never free text) — freeform write-ins have no such
+  structure, which is why they stay lumped into one bucket in the composition split
+  rather than broken out further. All of this is safe to aggregate raw since the whole
+  action is already manager-gated.
 - **Money handling**: everything is stored as integer cents (`PriceLine.amountCents`,
   `Order.totalPriceCents`); `lib/money.ts` has the only formatting/parsing helpers
   (`formatCents`, `parseDollarsToCents`) — nothing else should touch a raw dollar float.

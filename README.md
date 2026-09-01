@@ -242,7 +242,7 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Reopen a completed item                             |    No    |   Yes   |
 | Authorize item pickup (partial or full order)         |   Yes    |   Yes   |
 | Undo an accidental pickup                             |    No    |   Yes   |
-| Manage employee PINs / manager accounts              |    No    |   Yes   |
+| Manage employee PINs / names / manager accounts      |    No    |   Yes   |
 | Manage garment/alteration options                    |    No    |   Yes   |
 | View analytics                                       |    No    |   Yes   |
 | Enter itemized pricing **at intake creation only**    |   Yes    |   Yes   |

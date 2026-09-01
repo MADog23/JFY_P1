@@ -82,6 +82,34 @@ export async function resetEmployeePin(employeeId: string, newPin: string): Prom
   return { ok: true };
 }
 
+/** MANAGER ONLY: renames an employee's PIN-login display name (e.g. a spelling fix or
+ * a legal name change) — doesn't touch their PIN, active state, or any historical
+ * audit-log text, which keeps the name as it was at the time of that entry. */
+export async function renameEmployee(employeeId: string, newName: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const trimmed = newName.trim();
+  if (!trimmed) return { ok: false, error: "Name is required." };
+  if (trimmed.length > 100) return { ok: false, error: "Name is too long." };
+
+  const employee = await db.user.findUnique({ where: { id: employeeId } });
+  if (!employee || employee.role !== "EMPLOYEE") return { ok: false, error: "Employee not found." };
+
+  if (trimmed === employee.name) return { ok: true };
+
+  await db.user.update({ where: { id: employeeId }, data: { name: trimmed } });
+
+  await logAudit({
+    entityType: "EMPLOYEE",
+    entityId: employeeId,
+    action: "EMPLOYEE_RENAMED",
+    summary: `"${employee.name}" renamed to "${trimmed}" by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidatePath("/manager/employees");
+  return { ok: true };
+}
+
 export async function setEmployeeActive(employeeId: string, active: boolean): Promise<ActionResult> {
   const session = await requireManager();
   const employee = await db.user.findUnique({ where: { id: employeeId } });

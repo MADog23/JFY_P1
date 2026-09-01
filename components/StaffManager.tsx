@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import {
   createEmployee,
+  renameEmployee,
   resetEmployeePin,
   setEmployeeActive,
   createManager,
@@ -24,6 +25,21 @@ function EmployeeSection({ employees }: { employees: any[] }) {
   const [error, setError] = useState<string | null>(null);
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [newPin, setNewPin] = useState("");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  function startReset(id: string) {
+    setRenameTarget(null);
+    setResetTarget(id);
+    setError(null);
+  }
+
+  function startRename(emp: { id: string; name: string }) {
+    setResetTarget(null);
+    setRenameTarget(emp.id);
+    setRenameValue(emp.name);
+    setError(null);
+  }
 
   return (
     <section className="rounded-2xl border border-linen bg-white p-6">
@@ -32,51 +48,91 @@ function EmployeeSection({ employees }: { employees: any[] }) {
       <ul className="mb-5 divide-y divide-linen">
         {employees.map((e) => (
           <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-            <div>
-              <p className="text-ink">{e.name}</p>
-              <p className="text-xs text-charcoal/50">{e.active ? "Active" : "Deactivated"}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {resetTarget === e.id ? (
-                <>
+            <div className="min-w-[140px] flex-1">
+              {renameTarget === e.id ? (
+                <div className="flex items-center gap-2">
                   <input
-                    value={newPin}
-                    onChange={(ev) => setNewPin(ev.target.value)}
-                    placeholder="New PIN"
-                    className="focus-ring w-24 rounded-lg border border-linen px-2 py-1 text-sm"
+                    value={renameValue}
+                    onChange={(ev) => setRenameValue(ev.target.value)}
+                    className="focus-ring w-full max-w-[220px] rounded-lg border border-linen px-2 py-1 text-sm"
+                    autoFocus
                   />
                   <button
-                    disabled={isPending}
+                    disabled={isPending || !renameValue.trim()}
                     onClick={() =>
                       startTransition(async () => {
-                        const r = await resetEmployeePin(e.id, newPin);
-                        if (r.ok) {
-                          setResetTarget(null);
-                          setNewPin("");
-                        } else setError(r.error || "Could not reset PIN.");
+                        const r = await renameEmployee(e.id, renameValue);
+                        if (r.ok) setRenameTarget(null);
+                        else setError(r.error || "Could not rename employee.");
                       })
                     }
-                    className="focus-ring rounded-lg bg-ink px-3 py-1 text-xs text-cream"
+                    className="focus-ring rounded-lg bg-ink px-3 py-1 text-xs text-cream disabled:opacity-40"
                   >
                     Save
                   </button>
-                </>
+                  <button
+                    onClick={() => setRenameTarget(null)}
+                    className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                  >
+                    Cancel
+                  </button>
+                </div>
               ) : (
+                <>
+                  <p className="text-ink">{e.name}</p>
+                  <p className="text-xs text-charcoal/50">{e.active ? "Active" : "Deactivated"}</p>
+                </>
+              )}
+            </div>
+            {renameTarget !== e.id && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setResetTarget(e.id)}
+                  onClick={() => startRename(e)}
                   className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
                 >
-                  Reset PIN
+                  Edit name
                 </button>
-              )}
-              <button
-                disabled={isPending}
-                onClick={() => startTransition(async () => { await setEmployeeActive(e.id, !e.active); })}
-                className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
-              >
-                {e.active ? "Deactivate" : "Reactivate"}
-              </button>
-            </div>
+                {resetTarget === e.id ? (
+                  <>
+                    <input
+                      value={newPin}
+                      onChange={(ev) => setNewPin(ev.target.value)}
+                      placeholder="New PIN"
+                      className="focus-ring w-24 rounded-lg border border-linen px-2 py-1 text-sm"
+                    />
+                    <button
+                      disabled={isPending}
+                      onClick={() =>
+                        startTransition(async () => {
+                          const r = await resetEmployeePin(e.id, newPin);
+                          if (r.ok) {
+                            setResetTarget(null);
+                            setNewPin("");
+                          } else setError(r.error || "Could not reset PIN.");
+                        })
+                      }
+                      className="focus-ring rounded-lg bg-ink px-3 py-1 text-xs text-cream"
+                    >
+                      Save
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => startReset(e.id)}
+                    className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                  >
+                    Reset PIN
+                  </button>
+                )}
+                <button
+                  disabled={isPending}
+                  onClick={() => startTransition(async () => { await setEmployeeActive(e.id, !e.active); })}
+                  className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                >
+                  {e.active ? "Deactivate" : "Reactivate"}
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>

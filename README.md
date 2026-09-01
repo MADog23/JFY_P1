@@ -35,6 +35,16 @@ styled with Tailwind, deployed on **Railway**.
   accounts, manage the garment/alteration option lists, and a basic analytics page.
 - **Photo capture placeholder**: the UI and data model support photos now; actual file
   storage is intentionally not wired up yet (see `lib/images.ts` for how to connect it).
+- **Branding**: the login screen shows the shop's circular "JFY" mark (`public/logo.png`,
+  a transparent-background cutout so it sits directly on the page rather than in a white
+  box). The browser tab icon, iOS "Add to Home Screen" icon, and Android/Chrome PWA
+  install icon all use the dark rounded-square version instead (`app/icon.png`,
+  `app/apple-icon.png`, `public/icons/icon-192.png` / `icon-512.png`) via Next's
+  file-convention favicons plus `app/manifest.ts` — so a phone's home screen shows the
+  same dark "JFY" mark as the app icon, not a generic browser icon. Both source images
+  came from small screenshots (~260–320px), so the upscaled 512px icon is a little
+  softer than a vector source would give — worth swapping in higher-res source art
+  later if the shop has it, but it reads clean at the sizes these are actually shown at.
 - **Itemized pricing**: a second, receipt-style step in the intake form where an
   employee can price out each selected alteration (plus freeform lines, e.g. a rush
   fee) — entirely optional, anything left blank can be filled in later. Once the

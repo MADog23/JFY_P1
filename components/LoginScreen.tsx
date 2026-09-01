@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useTransition } from "react";
 import { employeeLogin, managerLogin } from "@/actions/auth";
 
@@ -12,6 +13,14 @@ export default function LoginScreen({ employees }: { employees: Employee[] }) {
     <main className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
+          <Image
+            src="/logo.png"
+            alt="Just For You Alterations"
+            width={168}
+            height={168}
+            priority
+            className="mx-auto mb-3 h-20 w-20"
+          />
           <p className="text-xs uppercase tracking-widest text-thread">Mt Juliet, TN</p>
           <h1 className="mt-1 font-display text-3xl text-ink">Just For You Alterations</h1>
           <p className="mt-1 text-sm text-charcoal/70">Digital ticket desk</p>

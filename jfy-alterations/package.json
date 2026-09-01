@@ -13,8 +13,6 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:pricing-demo": "tsx prisma/seed-pricing-demo.ts",
     "db:seed:pricing-demo:clear": "tsx prisma/clear-pricing-demo.ts",
-    "db:seed:historical-demo": "tsx prisma/seed-historical-demo.ts",
-    "db:seed:historical-demo:clear": "tsx prisma/clear-historical-demo.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

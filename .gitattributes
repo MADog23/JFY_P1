@@ -1,0 +1,18 @@
+# Normalize line endings to LF for everything Git treats as text, regardless
+# of the OS or editor that touches it, or what a local core.autocrlf setting
+# says. Without this, Windows checkouts convert to CRLF on disk while this
+# project's files (including anything delivered as a fresh export) stay LF,
+# which makes `git status`/`git diff` flag nearly the whole repo as
+# "modified" even when no real content changed — see the false-positive diff
+# noise this was added to fix.
+* text=auto eol=lf
+
+# Belt-and-suspenders: a few types that should never be reinterpreted as text
+# even if extensions are guessed wrong.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

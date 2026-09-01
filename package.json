@@ -12,6 +12,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:pricing-demo": "tsx prisma/seed-pricing-demo.ts",
+    "db:seed:pricing-demo:clear": "tsx prisma/clear-pricing-demo.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

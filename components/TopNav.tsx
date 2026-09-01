@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { logout } from "@/actions/auth";
+import { MobileNavMenu } from "./MobileNavMenu";
 
 export function TopNav({
   name,
@@ -9,6 +10,12 @@ export function TopNav({
   role: "EMPLOYEE" | "MANAGER";
 }) {
   const base = role === "MANAGER" ? "/manager" : "/employee";
+  const managerLinks = [
+    { href: "/manager/employees", label: "Staff" },
+    { href: "/manager/taxonomy", label: "Garment options" },
+    { href: "/manager/analytics", label: "Analytics" },
+  ];
+
   return (
     <header className="border-b border-linen bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
@@ -20,23 +27,17 @@ export function TopNav({
             <Link href={base} className="hover:text-ink">
               Orders
             </Link>
-            {role === "MANAGER" && (
-              <>
-                <Link href="/manager/employees" className="hover:text-ink">
-                  Staff
+            {role === "MANAGER" &&
+              managerLinks.map((link) => (
+                <Link key={link.href} href={link.href} className="hover:text-ink">
+                  {link.label}
                 </Link>
-                <Link href="/manager/taxonomy" className="hover:text-ink">
-                  Garment options
-                </Link>
-                <Link href="/manager/analytics" className="hover:text-ink">
-                  Analytics
-                </Link>
-              </>
-            )}
+              ))}
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <span className="text-charcoal/70">
+          {role === "MANAGER" && <MobileNavMenu links={managerLinks} />}
+          <span className="hidden text-charcoal/70 sm:inline">
             {name} <span className="text-charcoal/40">· {role === "MANAGER" ? "Manager" : "Employee"}</span>
           </span>
           <form action={logout}>

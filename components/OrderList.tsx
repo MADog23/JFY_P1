@@ -19,22 +19,50 @@ export function OrderList({ orders, basePath }: { orders: OrderRow[]; basePath: 
     );
   }
 
+  const rows = orders.map((order) => ({
+    ...order,
+    done: order.items.filter((i) => i.status === "COMPLETED" || i.status === "PICKED_UP").length,
+  }));
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-linen bg-white">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-linen bg-linen/40 text-left text-xs uppercase tracking-wide text-charcoal/50">
-            <th className="px-4 py-3">Order #</th>
-            <th className="px-4 py-3">Client</th>
-            <th className="px-4 py-3">Items</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Due</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((order) => {
-            const done = order.items.filter((i) => i.status === "COMPLETED" || i.status === "PICKED_UP").length;
-            return (
+    <>
+      {/* Mobile: stacked cards — a side-scrolling table is a bad fit on a phone */}
+      <div className="space-y-3 md:hidden">
+        {rows.map((order) => (
+          <Link
+            key={order.id}
+            href={`${basePath}/orders/${order.id}`}
+            className="focus-ring block rounded-2xl border border-linen bg-white p-4"
+          >
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="font-medium text-thread">{order.orderNumber}</span>
+              <StatusBadge status={order.status} kind="order" />
+            </div>
+            <p className="mb-2 text-ink">{order.clientName}</p>
+            <div className="flex items-center justify-between text-xs text-charcoal/60">
+              <span>
+                {order.done}/{order.items.length} items done
+              </span>
+              <span>{order.dueDate ? `Due ${new Date(order.dueDate).toLocaleDateString()}` : "No due date"}</span>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Desktop / tablet: full table */}
+      <div className="hidden overflow-hidden rounded-2xl border border-linen bg-white md:block">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-linen bg-linen/40 text-left text-xs uppercase tracking-wide text-charcoal/50">
+              <th className="px-4 py-3">Order #</th>
+              <th className="px-4 py-3">Client</th>
+              <th className="px-4 py-3">Items</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((order) => (
               <tr key={order.id} className="border-b border-linen last:border-0 hover:bg-cream">
                 <td className="px-4 py-3">
                   <Link href={`${basePath}/orders/${order.id}`} className="font-medium text-thread hover:underline">
@@ -43,7 +71,7 @@ export function OrderList({ orders, basePath }: { orders: OrderRow[]; basePath: 
                 </td>
                 <td className="px-4 py-3">{order.clientName}</td>
                 <td className="px-4 py-3 text-charcoal/60">
-                  {done}/{order.items.length} done
+                  {order.done}/{order.items.length} done
                 </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={order.status} kind="order" />
@@ -52,10 +80,10 @@ export function OrderList({ orders, basePath }: { orders: OrderRow[]; basePath: 
                   {order.dueDate ? new Date(order.dueDate).toLocaleDateString() : "—"}
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

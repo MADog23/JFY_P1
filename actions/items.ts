@@ -230,6 +230,30 @@ export async function upsertMeasurement(
   return { ok: true };
 }
 
+/** Employee or manager: removes a measurement that was added in error. */
+export async function deleteMeasurement(measurementId: string): Promise<ActionResult> {
+  const session = await requireSession();
+  const measurement = await db.itemMeasurement.findUnique({
+    where: { id: measurementId },
+    include: { orderItem: true },
+  });
+  if (!measurement) return { ok: false, error: "Measurement not found." };
+
+  await db.itemMeasurement.delete({ where: { id: measurementId } });
+
+  await logAudit({
+    orderId: measurement.orderItem.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: measurement.orderItemId,
+    action: "MEASUREMENT_DELETED",
+    summary: `Measurement "${measurement.label}" (was "${measurement.value}") removed from "${measurement.orderItem.description}" by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(measurement.orderItem.orderId);
+  return { ok: true };
+}
+
 /**
  * Employee or manager: records that a photo was captured. `url` is intentionally left
  * null in Phase 1 — see lib/images.ts for how to wire this up to real cloud storage

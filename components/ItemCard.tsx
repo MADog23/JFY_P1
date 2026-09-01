@@ -7,6 +7,7 @@ import {
   reopenItem,
   addItemNote,
   upsertMeasurement,
+  deleteMeasurement,
   addImagePlaceholder,
   authorizeItemPickup,
   updateItemIntake,
@@ -172,10 +173,7 @@ export default function ItemCard({
         {item.measurements?.length > 0 && (
           <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {item.measurements.map((m: any) => (
-              <div key={m.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
-                <p className="text-charcoal/50">{m.label}</p>
-                <p className="font-medium text-ink">{m.value}</p>
-              </div>
+              <MeasurementRow key={m.id} measurement={m} />
             ))}
           </div>
         )}
@@ -364,6 +362,84 @@ function ItemIntakeEditor({
           Save changes
         </button>
         <button onClick={onDone} className="focus-ring rounded-lg border border-linen px-4 py-2 text-sm">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MeasurementRow({ measurement }: { measurement: any }) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(measurement.label);
+  const [value, setValue] = useState(measurement.value);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="focus-ring rounded-lg bg-cream px-3 py-2 text-left text-sm hover:bg-linen"
+      >
+        <p className="text-charcoal/50">{measurement.label}</p>
+        <p className="font-medium text-ink">{measurement.value}</p>
+      </button>
+    );
+  }
+
+  return (
+    <div className="col-span-2 rounded-lg border border-thread/30 bg-white p-2 sm:col-span-1">
+      {error && <p className="mb-1 text-[11px] text-alert">{error}</p>}
+      <input
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        className="focus-ring mb-1 w-full rounded border border-linen px-2 py-1 text-xs"
+        placeholder="Label"
+      />
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="focus-ring mb-1.5 w-full rounded border border-linen px-2 py-1 text-xs"
+        placeholder="Value"
+      />
+      <div className="flex gap-1">
+        <button
+          disabled={isPending || !label.trim() || !value.trim()}
+          onClick={() =>
+            startTransition(async () => {
+              const r = await upsertMeasurement(measurement.orderItemId, label, value, measurement.id);
+              if (r.ok) setEditing(false);
+              else setError(r.error || "Could not save.");
+            })
+          }
+          className="focus-ring flex-1 rounded bg-ink px-2 py-1 text-xs text-cream disabled:opacity-40"
+        >
+          Save
+        </button>
+        <button
+          disabled={isPending}
+          onClick={() => {
+            if (!confirm(`Remove the "${measurement.label}" measurement?`)) return;
+            startTransition(async () => {
+              const r = await deleteMeasurement(measurement.id);
+              if (!r.ok) setError(r.error || "Could not delete.");
+            });
+          }}
+          className="focus-ring rounded border border-alert/40 px-2 py-1 text-xs text-alert hover:bg-alert/10"
+        >
+          Delete
+        </button>
+        <button
+          onClick={() => {
+            setEditing(false);
+            setLabel(measurement.label);
+            setValue(measurement.value);
+            setError(null);
+          }}
+          className="focus-ring rounded border border-linen px-2 py-1 text-xs text-charcoal/60"
+        >
           Cancel
         </button>
       </div>

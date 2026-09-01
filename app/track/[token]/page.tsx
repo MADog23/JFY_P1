@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { getPublicOrderView } from "@/lib/client-view";
 
+// Public page, queried fresh per token — never prerender/cache this at build time.
+export const dynamic = "force-dynamic";
+
 const ITEM_LABELS: Record<string, string> = {
   PENDING: "Not started",
   IN_PROGRESS: "In progress",

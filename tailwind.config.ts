@@ -5,15 +5,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#1C2321",
-        charcoal: "#2E3532",
-        thread: "#8A5A44",
-        brass: "#B08D57",
-        cream: "#F7F4EE",
-        linen: "#EDE7DA",
-        sage: "#5C7A6A",
+        // Palette matches justforyoualterations.com's own declared brand color
+        // (#d7cfd2, a soft dusty rose/mauve) rather than an invented "tailoring shop"
+        // look — see /home/claude notes in the handoff for how these were derived.
+        ink: "#241B1E", // primary text, near-black with a warm plum undertone
+        charcoal: "#4A383D", // secondary text / labels
+        thread: "#8A4A56", // primary accent — links, active states, buttons
+        brass: "#B98A93", // secondary accent — badge fills/borders, highlights
+        cream: "#FAF5F4", // page background
+        linen: "#DAD0D2", // borders / card hairlines — closest match to the site's own #d7cfd2
+        sage: "#6B8071", // semantic "completed / success" color, kept distinct from the brand hue
         rose: "#A65C57",
-        alert: "#B3492B",
+        alert: "#B23A45", // errors, overdue — kept in the same warm family as the rest
       },
       fontFamily: {
         display: ["Georgia", "Cambria", "serif"],
@@ -33,3 +36,4 @@ const config: Config = {
 };
 
 export default config;
+

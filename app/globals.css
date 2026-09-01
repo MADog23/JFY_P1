@@ -7,13 +7,13 @@ html {
 }
 
 body {
-  background-color: #F7F4EE;
-  color: #1C2321;
+  background-color: #FAF5F4;
+  color: #241B1E;
 }
 
 ::selection {
-  background-color: #B08D57;
-  color: #F7F4EE;
+  background-color: #8A4A56;
+  color: #FAF5F4;
 }
 
 .focus-ring {

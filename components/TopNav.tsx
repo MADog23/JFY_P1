@@ -53,7 +53,7 @@ export function TopNav({
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          {role === "MANAGER" && <MobileNavMenu links={managerLinks} />}
+          <MobileNavMenu links={role === "MANAGER" ? managerLinks : phase2Links} />
           <span className="text-charcoal/70">
             {name}{" "}
             <span className="hidden text-charcoal/40 sm:inline">

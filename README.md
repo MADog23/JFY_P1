@@ -27,6 +27,9 @@ styled with Tailwind, deployed on **Railway**.
   lives in the URL's query string so a search is a shareable/bookmarkable link.
 - **Public client tracking link**: a no-login, read-only page showing order/item status
   only — see "Client-view privacy" below for exactly what is and isn't shown.
+- **Client order lookup**: a fallback for clients who don't have their tracking link
+  handy — they enter their order number + phone number at `/track` and, on a match, land
+  on the same tracking page above. See "Client order lookup" below for the full design.
 - **Full audit trail**: every change anywhere in the system is attributed to the
   employee or manager who made it, with a timestamp.
 - **Employee PIN login** (shared phones/tablets) vs. **manager email+password login**,
@@ -208,6 +211,42 @@ client name so it's obviously not a real client and easy to remove later. Run it
 `[DEMO]`-prefixed orders `seed-pricing-demo.ts` makes, so clearing one never touches
 the other.
 
+## Client order lookup
+
+Added because handing a client their tracking link required a text or email in the
+moment, which wasn't always practical at the counter. This is additive — the existing
+`clientToken` link keeps working exactly as before for anyone it's already been sent to;
+this just gives staff a second way to get a client into the same page.
+
+- **How it works**: `/track` (no token) is a new public page — order number + phone
+  number in, and on a match it redirects into the existing, unchanged `/track/[token]`
+  view. It never renders any order data itself; the lookup either finds a `clientToken`
+  and redirects, or shows a generic "couldn't find a match" message. All the logic lives
+  in one function, `lookupClientToken()` in `lib/client-view.ts`, right next to the
+  redaction rules it hands off to.
+- **What counts as a match**: the order number (accepts `JFY-000123`, `000123`, `123`,
+  lowercase, no dash — anything with the right digits) plus a phone number matching
+  either `Order.clientPhone` or `Order.pickupContactPhone`, compared digit-only (so
+  formatting like dashes/parens/a leading country code doesn't matter). Wrong order
+  number, wrong phone, or an order that doesn't exist all produce the exact same "no
+  match" response — it never hints at which part was wrong, so a guess reveals nothing.
+- **Why phone + order number and not just the order number**: order numbers are
+  sequential (`JFY-000123`, `JFY-000124`, ...) and easy to guess or enumerate; a phone
+  number on file is a second factor that isn't derivable from the order number itself.
+  This is the "fair compromise between security and simplicity" tradeoff, as opposed to
+  either a bare `/track/{order number}` link (rejected — no second factor) or shortening
+  the existing random `clientToken` (a separate, independent idea, not done here).
+- **Basic brute-force throttling**: `lib/rate-limit.ts` adds a small in-memory cap (8
+  attempts per IP per 10 minutes) on the lookup action. It's explicitly best-effort —
+  counters reset on every deploy/restart and don't coordinate across multiple instances
+  — but for a single small shop's traffic it's a free deterrent against someone
+  scripting through phone numbers for a known order number. Swap it for a real
+  rate-limiting store later if this ever needs to hold up under real abuse.
+- **Where staff see it**: the order profile's "Copy client tracking link" area now also
+  shows the `/track` URL and that order's number as a one-line hint, so staff can just
+  tell a client "go to [site]/track and enter your order number and phone number" without
+  needing to send anything.
+
 ## Project structure
 
 ```
@@ -216,12 +255,15 @@ app/                      Next.js App Router pages
   employee/                Employee dashboard, new-intake form, order working profile
   manager/                 Manager dashboard, order profile, staff, taxonomy, analytics
   track/[token]/           Public read-only client tracking page
+  track/page.tsx           Public order-number + phone lookup page (routes into the above)
 actions/                  Server actions (all mutations + audit logging live here)
   pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake
+  track.ts                 Public (not gated): order-number + phone lookup action
 lib/                      DB client, auth/session, audit log, order numbering,
                            order-status lifecycle, client-view redaction
   pricing.ts                recomputeOrderTotal — call inside any PriceLine mutation's tx
   money.ts                   formatCents / parseDollarsToCents — the only place cents<->dollars happens
+  rate-limit.ts              Best-effort in-memory throttle, used by actions/track.ts
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
   PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
   OrderSearchBar.tsx         Client + date-range search box for the employee/manager order lists

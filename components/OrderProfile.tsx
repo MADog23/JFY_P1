@@ -66,6 +66,9 @@ export default function OrderProfile({
 function OrderHeader({ order, role, trackingUrl }: { order: any; role: "EMPLOYEE" | "MANAGER"; trackingUrl: string }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // trackingUrl is "<baseUrl>/track/<clientToken>" — strip the token to get the
+  // standalone lookup page a client can use with just their order number + phone.
+  const lookupUrl = trackingUrl.replace(/\/track\/.+$/, "/track");
 
   return (
     <div className="rounded-2xl border border-linen bg-white p-6">
@@ -118,6 +121,11 @@ function OrderHeader({ order, role, trackingUrl }: { order: any; role: "EMPLOYEE
         </button>
         {role === "MANAGER" && <RotateTokenButton orderId={order.id} />}
       </div>
+      <p className="mt-2 text-xs text-charcoal/50">
+        No easy way to send that link? They can also visit{" "}
+        <span className="font-medium text-charcoal/70">{lookupUrl}</span> and look up order{" "}
+        {order.orderNumber} with the phone number on file.
+      </p>
     </div>
   );
 }

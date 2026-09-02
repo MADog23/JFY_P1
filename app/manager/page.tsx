@@ -56,7 +56,7 @@ export default async function ManagerDashboard({
 
         <OrderSearchBar />
 
-        <div className="mb-4 flex gap-2 text-sm">
+        <div className="mb-4 flex flex-wrap gap-2 text-sm">
           {[
             ["ACTIVE", "In progress"],
             ["SEALED", "Ready for pickup"],
@@ -67,7 +67,7 @@ export default async function ManagerDashboard({
             <Link
               key={value}
               href={tabHref(value)}
-              className={`rounded-full border px-3 py-1.5 ${
+              className={`whitespace-nowrap rounded-full border px-3 py-1.5 ${
                 filter === value
                   ? "border-thread bg-thread text-cream"
                   : "border-linen bg-white text-charcoal/60 hover:border-thread/50"
@@ -78,7 +78,7 @@ export default async function ManagerDashboard({
           ))}
           <Link
             href={mineHref()}
-            className={`ml-auto rounded-full border px-3 py-1.5 ${
+            className={`ml-auto whitespace-nowrap rounded-full border px-3 py-1.5 ${
               mine
                 ? "border-thread bg-thread text-cream"
                 : "border-linen bg-white text-charcoal/60 hover:border-thread/50"

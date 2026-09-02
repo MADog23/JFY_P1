@@ -24,7 +24,7 @@ export function MobileNavMenu({ links }: { links: { href: string; label: string 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-linen bg-white p-1.5 shadow-lg">
+          <div className="absolute left-0 top-full z-20 mt-2 w-48 rounded-xl border border-linen bg-white p-1.5 shadow-lg">
             {links.map((link) => (
               <Link
                 key={link.href}

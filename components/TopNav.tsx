@@ -30,7 +30,8 @@ export function TopNav({
   return (
     <header className="border-b border-linen bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-6">
+          <MobileNavMenu links={role === "MANAGER" ? managerLinks : phase2Links} />
           <Link href={base} className="font-display text-lg text-ink">
             Just For You <span className="text-thread">· Alterations</span>
           </Link>
@@ -53,7 +54,6 @@ export function TopNav({
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <MobileNavMenu links={role === "MANAGER" ? managerLinks : phase2Links} />
           <span className="text-charcoal/70">
             {name}{" "}
             <span className="hidden text-charcoal/40 sm:inline">

@@ -271,7 +271,7 @@ export async function removeItem(itemId: string, reason?: string): Promise<Actio
         );
         return { ok: true as const };
       },
-      { isolation: Prisma.TransactionIsolationLevel.Serializable }
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
 
     if (!result.ok) return result;

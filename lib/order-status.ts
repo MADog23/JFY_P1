@@ -3,8 +3,8 @@ import { db } from "./db";
 import type { Prisma } from "@prisma/client";
 
 /**
- * Recomputes an Order's status from the status of its items. This is the single
- * source of truth for the seal/reopen/pickup lifecycle so that no code path can
+ * Recomputes an Order's status from the status of its (non-removed) items. This is the
+ * single source of truth for the seal/reopen/pickup lifecycle so that no code path can
  * accidentally leave an order sealed when work has reopened, or unsealed when it
  * shouldn't be:
  *
@@ -12,14 +12,27 @@ import type { Prisma } from "@prisma/client";
  *  - Every item COMPLETED or PICKED_UP (mixed)   -> order SEALED
  *  - Every item PICKED_UP                        -> order PICKED_UP
  *
- * Call this inside the same transaction as any item status change.
+ * A soft-removed item (OrderItem.removedAt, see actions/items.ts:removeItem) never
+ * counts toward any of this — it's excluded from the query below entirely, the same way
+ * it's excluded from the public tracking page and analytics.
+ *
+ * CANCELLED is NOT part of this derivation and is deliberately sticky: a cancelled
+ * order (actions/orders.ts:cancelOrder) stays CANCELLED regardless of what its items are
+ * doing, so this bails out immediately rather than silently un-cancelling an order the
+ * moment someone touches one of its items. Only uncancelOrder calls this function to
+ * intentionally recompute a fresh status from current item state.
+ *
+ * Call this inside the same transaction as any item status/removal change.
  */
 export async function recomputeOrderStatus(
   orderId: string,
   tx: Prisma.TransactionClient = db
 ) {
+  const order = await tx.order.findUnique({ where: { id: orderId }, select: { status: true, sealedAt: true } });
+  if (!order || order.status === "CANCELLED") return;
+
   const items = await tx.orderItem.findMany({
-    where: { orderId },
+    where: { orderId, removedAt: null },
     select: { status: true },
   });
 
@@ -34,12 +47,11 @@ export async function recomputeOrderStatus(
       data: { status: "PICKED_UP" },
     });
   } else if (allDone) {
-    const order = await tx.order.findUnique({ where: { id: orderId }, select: { sealedAt: true } });
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: "SEALED",
-        sealedAt: order?.sealedAt ?? new Date(),
+        sealedAt: order.sealedAt ?? new Date(),
       },
     });
   } else {

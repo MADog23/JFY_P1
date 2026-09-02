@@ -57,6 +57,60 @@ export async function addAlterationType(label: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/** MANAGER ONLY: fixes a typo in an existing garment type label — previously the only
+ * recourse was deactivating the misspelled one and adding a fresh, correctly-spelled
+ * option, leaving the typo sitting in the list forever. Existing items keep whatever
+ * garmentType string they were created with either way (it's copied at intake time, not
+ * a live reference to this row), so a rename here only affects future intake pickers. */
+export async function renameGarmentType(id: string, label: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const trimmed = label.trim();
+  if (!trimmed) return { ok: false, error: "Label required." };
+
+  const existing = await db.garmentTypeOption.findUnique({ where: { id } });
+  if (!existing) return { ok: false, error: "Garment type not found." };
+  if (trimmed === existing.label) return { ok: true };
+
+  const conflict = await db.garmentTypeOption.findUnique({ where: { label: trimmed } });
+  if (conflict) return { ok: false, error: "A garment type with that label already exists." };
+
+  await db.garmentTypeOption.update({ where: { id }, data: { label: trimmed } });
+  await logAudit({
+    entityType: "TAXONOMY",
+    entityId: id,
+    action: "GARMENT_TYPE_RENAMED",
+    summary: `Garment type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
+    performedById: session.userId,
+  });
+  revalidatePath("/manager/taxonomy");
+  return { ok: true };
+}
+
+/** MANAGER ONLY: same as renameGarmentType, for the alteration type list. */
+export async function renameAlterationType(id: string, label: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const trimmed = label.trim();
+  if (!trimmed) return { ok: false, error: "Label required." };
+
+  const existing = await db.alterationTypeOption.findUnique({ where: { id } });
+  if (!existing) return { ok: false, error: "Alteration type not found." };
+  if (trimmed === existing.label) return { ok: true };
+
+  const conflict = await db.alterationTypeOption.findUnique({ where: { label: trimmed } });
+  if (conflict) return { ok: false, error: "An alteration type with that label already exists." };
+
+  await db.alterationTypeOption.update({ where: { id }, data: { label: trimmed } });
+  await logAudit({
+    entityType: "TAXONOMY",
+    entityId: id,
+    action: "ALTERATION_TYPE_RENAMED",
+    summary: `Alteration type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
+    performedById: session.userId,
+  });
+  revalidatePath("/manager/taxonomy");
+  return { ok: true };
+}
+
 export async function toggleGarmentType(id: string, active: boolean): Promise<ActionResult> {
   const session = await requireManager();
   const opt = await db.garmentTypeOption.update({ where: { id }, data: { active } });

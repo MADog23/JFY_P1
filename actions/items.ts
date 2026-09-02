@@ -166,6 +166,80 @@ export async function reopenItem(itemId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/**
+ * MANAGER ONLY: soft-removes an item added entirely by mistake (duplicate, wrong
+ * garment) — see OrderItem.removedAt in schema.prisma. Only allowed while the item is
+ * still PENDING or IN_PROGRESS: once it's COMPLETED or PICKED_UP it's real operational
+ * history, not a data-entry mistake, and updateItemIntake is the right tool to fix its
+ * details instead. Also refuses to remove the last remaining (non-removed) item on an
+ * order — recomputeOrderStatus has nothing to derive a status from with zero items, and
+ * an order with none left doesn't make sense; cancel the whole order instead.
+ */
+export async function removeItem(itemId: string, reason?: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const item = await db.orderItem.findUnique({ where: { id: itemId } });
+  if (!item) return { ok: false, error: "Item not found." };
+  if (item.removedAt) return { ok: true };
+  if (item.status === "COMPLETED" || item.status === "PICKED_UP") {
+    return { ok: false, error: "This item has already been worked — edit its details instead of removing it." };
+  }
+
+  const remainingCount = await db.orderItem.count({
+    where: { orderId: item.orderId, removedAt: null, id: { not: itemId } },
+  });
+  if (remainingCount === 0) {
+    return { ok: false, error: "Can't remove the last item on an order — cancel the whole order instead." };
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.orderItem.update({
+      where: { id: itemId },
+      data: { removedAt: new Date(), removedById: session.userId },
+    });
+    await recomputeOrderStatus(item.orderId, tx);
+  });
+
+  await logAudit({
+    orderId: item.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: itemId,
+    action: "ITEM_REMOVED",
+    summary: `"${item.description}" (${item.garmentType}) removed by ${session.name}${reason?.trim() ? ` — ${reason.trim()}` : ""}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
+/** MANAGER ONLY: undoes an accidental item removal. */
+export async function restoreItem(itemId: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const item = await db.orderItem.findUnique({ where: { id: itemId } });
+  if (!item) return { ok: false, error: "Item not found." };
+  if (!item.removedAt) return { ok: false, error: "This item hasn't been removed." };
+
+  await db.$transaction(async (tx) => {
+    await tx.orderItem.update({
+      where: { id: itemId },
+      data: { removedAt: null, removedById: null },
+    });
+    await recomputeOrderStatus(item.orderId, tx);
+  });
+
+  await logAudit({
+    orderId: item.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: itemId,
+    action: "ITEM_RESTORED",
+    summary: `"${item.description}" restored by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
 /** Employee or manager: append-only working-profile note. */
 export async function addItemNote(itemId: string, body: string): Promise<ActionResult> {
   const session = await requireSession();
@@ -188,6 +262,74 @@ export async function addItemNote(itemId: string, body: string): Promise<ActionR
   });
 
   revalidateOrder(item.orderId);
+  return { ok: true };
+}
+
+/**
+ * Fixes a note that was entered wrong (typo, wrong measurement jotted down, wrong
+ * item's info) — see the ItemNote model comment in schema.prisma for why notes are
+ * otherwise append-only. The original author's name and the note's original createdAt
+ * are left as-is (this is a correction, not a re-authoring).
+ *
+ * Who can do this: the note's own author, or any manager — never a different
+ * employee's note. This is deliberately NOT a free edit even for the author: every
+ * edit is audit-logged with the note's previous text in the summary (`was: "..."`),
+ * so nothing can be silently rewritten — the log always keeps what it used to say,
+ * who changed it, and when, which is the actual property the append-only design was
+ * protecting. Letting the author fix their own typo without flagging down a manager
+ * doesn't cost that; it only removes the requirement that someone *else* sign off on
+ * a self-correction.
+ */
+export async function editItemNote(noteId: string, body: string): Promise<ActionResult> {
+  const session = await requireSession();
+  if (!body.trim()) return { ok: false, error: "Note can't be empty." };
+
+  const note = await db.itemNote.findUnique({ where: { id: noteId }, include: { orderItem: true } });
+  if (!note) return { ok: false, error: "Note not found." };
+  if (session.role !== "MANAGER" && note.authorId !== session.userId) {
+    return { ok: false, error: "You can only edit your own notes." };
+  }
+
+  await db.itemNote.update({ where: { id: noteId }, data: { body: body.trim() } });
+
+  await logAudit({
+    orderId: note.orderItem.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: note.orderItemId,
+    action: "NOTE_EDITED",
+    summary: `Note on "${note.orderItem.description}" corrected by ${session.name} (was: "${note.body}").`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(note.orderItem.orderId);
+  return { ok: true };
+}
+
+/** Removes a note added in error — the note's own author, or any manager (never a
+ * different employee's note; see editItemNote just above for the same reasoning).
+ * The audit log entry from when it was originally added is untouched, and the
+ * deletion itself is logged with the note's text, so there's still a full record it
+ * once existed and who removed it. */
+export async function deleteItemNote(noteId: string): Promise<ActionResult> {
+  const session = await requireSession();
+  const note = await db.itemNote.findUnique({ where: { id: noteId }, include: { orderItem: true } });
+  if (!note) return { ok: false, error: "Note not found." };
+  if (session.role !== "MANAGER" && note.authorId !== session.userId) {
+    return { ok: false, error: "You can only delete your own notes." };
+  }
+
+  await db.itemNote.delete({ where: { id: noteId } });
+
+  await logAudit({
+    orderId: note.orderItem.orderId,
+    entityType: "ORDER_ITEM",
+    entityId: note.orderItemId,
+    action: "NOTE_DELETED",
+    summary: `Note "${note.body}" removed from "${note.orderItem.description}" by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidateOrder(note.orderItem.orderId);
   return { ok: true };
 }
 

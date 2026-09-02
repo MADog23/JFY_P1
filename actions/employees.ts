@@ -129,6 +129,89 @@ export async function setEmployeeActive(employeeId: string, active: boolean): Pr
   return { ok: true };
 }
 
+/**
+ * MANAGER ONLY: fixes another manager's display name or login email — e.g. a typo made
+ * while creating their account, which previously had no correction path at all short of
+ * direct database access. Deliberately never touches password: that stays strictly
+ * self-service (see actions/auth.ts:changeMyPassword) so one manager can never silently
+ * take over another's account through this.
+ */
+const managerEditSchema = z.object({
+  name: z.string().min(1, "Name is required."),
+  email: z.string().email("Enter a valid email."),
+});
+
+export async function editManagerAccount(
+  managerId: string,
+  raw: z.infer<typeof managerEditSchema>
+): Promise<ActionResult> {
+  const session = await requireManager();
+  const parsed = managerEditSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const name = parsed.data.name.trim();
+  const email = parsed.data.email.toLowerCase().trim();
+
+  const manager = await db.user.findUnique({ where: { id: managerId } });
+  if (!manager || manager.role !== "MANAGER") return { ok: false, error: "Manager not found." };
+
+  if (email !== manager.email) {
+    const existing = await db.user.findUnique({ where: { email } });
+    if (existing && existing.id !== managerId) return { ok: false, error: "That email is already in use." };
+  }
+
+  if (name === manager.name && email === manager.email) return { ok: true };
+
+  await db.user.update({ where: { id: managerId }, data: { name, email } });
+
+  await logAudit({
+    entityType: "EMPLOYEE",
+    entityId: managerId,
+    action: "MANAGER_EDITED",
+    summary: `Manager account "${manager.name}" (${manager.email}) updated to "${name}" (${email}) by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidatePath("/manager/employees");
+  return { ok: true };
+}
+
+/**
+ * MANAGER ONLY: deactivate/reactivate another manager's account — mirrors
+ * setEmployeeActive, which explicitly refuses to touch a MANAGER row. Two safety
+ * guards on deactivation, since getting this wrong locks EVERYONE out with no recovery
+ * path except direct database access: can't deactivate your own account (that's what
+ * would actually cause a self-lockout — reactivating requires an active manager to do
+ * it), and can't deactivate the last remaining active manager account.
+ */
+export async function setManagerActive(managerId: string, active: boolean): Promise<ActionResult> {
+  const session = await requireManager();
+  const manager = await db.user.findUnique({ where: { id: managerId } });
+  if (!manager || manager.role !== "MANAGER") return { ok: false, error: "Manager not found." };
+
+  if (!active) {
+    if (manager.id === session.userId) {
+      return { ok: false, error: "You can't deactivate your own account." };
+    }
+    const activeManagerCount = await db.user.count({ where: { role: "MANAGER", active: true } });
+    if (activeManagerCount <= 1) {
+      return { ok: false, error: "Can't deactivate the last active manager account." };
+    }
+  }
+
+  await db.user.update({ where: { id: managerId }, data: { active } });
+
+  await logAudit({
+    entityType: "EMPLOYEE",
+    entityId: managerId,
+    action: active ? "MANAGER_REACTIVATED" : "MANAGER_DEACTIVATED",
+    summary: `Manager "${manager.name}" ${active ? "reactivated" : "deactivated"} by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidatePath("/manager/employees");
+  return { ok: true };
+}
+
 const managerSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),

@@ -9,6 +9,8 @@ import {
   updatePaymentStatus,
   updateOrderIntake,
   rotateClientToken,
+  cancelOrder,
+  uncancelOrder,
 } from "@/actions/orders";
 import { addItemToOrder } from "@/actions/items";
 import { formatCents } from "@/lib/money";
@@ -30,15 +32,28 @@ export default function OrderProfile({
   staff?: { id: string; name: string }[];
   currentUserId: string;
 }) {
+  const activeItems = order.items.filter((item: any) => !item.removedAt);
+  const removedItems = order.items.filter((item: any) => item.removedAt);
+  const cancelled = order.status === "CANCELLED";
+
   return (
     <div className="space-y-6">
+      {cancelled && (
+        <div className="rounded-2xl border border-alert/40 bg-alert/10 px-4 py-3 text-sm text-alert">
+          This order is cancelled — it no longer counts toward active lists or analytics. A manager can
+          restore it below if that was a mistake.
+        </div>
+      )}
       <OrderHeader order={order} role={role} trackingUrl={trackingUrl} />
       <GeneralNotesAndPayment order={order} role={role} />
       {role === "MANAGER" && <PricingPanel order={order} />}
 
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg text-ink">Items ({order.items.length})</h2>
+          <h2 className="font-display text-lg text-ink">
+            Items ({activeItems.length}
+            {removedItems.length > 0 ? `, ${removedItems.length} removed` : ""})
+          </h2>
         </div>
         <div className="space-y-4">
           {order.items.map((item: any) => (
@@ -53,7 +68,7 @@ export default function OrderProfile({
             />
           ))}
         </div>
-        {role === "MANAGER" && (
+        {role === "MANAGER" && !cancelled && (
           <AddItemForm orderId={order.id} garmentTypes={garmentTypes} alterationTypes={alterationTypes} />
         )}
       </section>
@@ -120,6 +135,13 @@ function OrderHeader({ order, role, trackingUrl }: { order: any; role: "EMPLOYEE
           {copied ? "Link copied!" : "Copy client tracking link"}
         </button>
         {role === "MANAGER" && <RotateTokenButton orderId={order.id} />}
+        {role === "MANAGER" && (
+          <CancelOrderButton
+            orderId={order.id}
+            orderNumber={order.orderNumber}
+            cancelled={order.status === "CANCELLED"}
+          />
+        )}
       </div>
       <p className="mt-2 text-xs text-charcoal/50">
         No easy way to send that link? They can also visit{" "}
@@ -239,6 +261,66 @@ function RotateTokenButton({ orderId }: { orderId: string }) {
     >
       Reset client link
     </button>
+  );
+}
+
+/**
+ * MANAGER ONLY: soft-cancels an order created entirely by mistake (duplicate ticket,
+ * wrong client, test order) — see the cancelOrder/uncancelOrder comments in
+ * actions/orders.ts. Reversible from the same button once cancelled.
+ */
+function CancelOrderButton({
+  orderId,
+  orderNumber,
+  cancelled,
+}: {
+  orderId: string;
+  orderNumber: string;
+  cancelled: boolean;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  if (cancelled) {
+    return (
+      <span className="flex items-center gap-2">
+        {error && <span className="text-xs text-alert">{error}</span>}
+        <button
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              setError(null);
+              const r = await uncancelOrder(orderId);
+              if (!r.ok) setError(r.error || "Could not restore.");
+            })
+          }
+          className="focus-ring rounded-lg border border-sage/40 bg-sage/10 px-3 py-1.5 text-sm text-sage hover:bg-sage/20"
+        >
+          Restore order
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      {error && <span className="text-xs text-alert">{error}</span>}
+      <button
+        disabled={isPending}
+        onClick={() => {
+          if (confirm(`Cancel order ${orderNumber}? This is reversible — a manager can restore it later.`)) {
+            startTransition(async () => {
+              setError(null);
+              const r = await cancelOrder(orderId);
+              if (!r.ok) setError(r.error || "Could not cancel.");
+            });
+          }
+        }}
+        className="focus-ring rounded-lg border border-alert/40 px-3 py-1.5 text-sm text-alert hover:bg-alert/10"
+      >
+        Cancel order
+      </button>
+    </span>
   );
 }
 

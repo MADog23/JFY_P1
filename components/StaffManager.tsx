@@ -7,13 +7,23 @@ import {
   resetEmployeePin,
   setEmployeeActive,
   createManager,
+  editManagerAccount,
+  setManagerActive,
 } from "@/actions/employees";
 
-export default function StaffManager({ employees, managers }: { employees: any[]; managers: any[] }) {
+export default function StaffManager({
+  employees,
+  managers,
+  currentUserId,
+}: {
+  employees: any[];
+  managers: any[];
+  currentUserId: string;
+}) {
   return (
     <div className="space-y-8">
       <EmployeeSection employees={employees} />
-      <ManagerSection managers={managers} />
+      <ManagerSection managers={managers} currentUserId={currentUserId} />
     </div>
   );
 }
@@ -172,7 +182,7 @@ function EmployeeSection({ employees }: { employees: any[] }) {
   );
 }
 
-function ManagerSection({ managers }: { managers: any[] }) {
+function ManagerSection({ managers, currentUserId }: { managers: any[]; currentUserId: string }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -180,17 +190,101 @@ function ManagerSection({ managers }: { managers: any[] }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const [editTarget, setEditTarget] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  function startEdit(m: { id: string; name: string; email: string }) {
+    setEditTarget(m.id);
+    setEditName(m.name);
+    setEditEmail(m.email);
+    setRowError(null);
+  }
+
   return (
     <section className="rounded-2xl border border-linen bg-white p-6">
       <h2 className="mb-4 font-display text-lg text-ink">Managers</h2>
       <ul className="mb-4 divide-y divide-linen">
         {managers.map((m) => (
-          <li key={m.id} className="py-3">
-            <p className="text-ink">{m.name}</p>
-            <p className="text-xs text-charcoal/50">{m.email}</p>
+          <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+            {editTarget === m.id ? (
+              <div className="w-full space-y-2">
+                {rowError && <p className="text-sm text-alert">{rowError}</p>}
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Name"
+                  className="focus-ring w-full max-w-xs rounded-lg border border-linen px-2 py-1 text-sm"
+                  autoFocus
+                />
+                <input
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="Email"
+                  type="email"
+                  className="focus-ring w-full max-w-xs rounded-lg border border-linen px-2 py-1 text-sm"
+                />
+                <div className="flex gap-2">
+                  <button
+                    disabled={isPending || !editName.trim() || !editEmail.trim()}
+                    onClick={() =>
+                      startTransition(async () => {
+                        const r = await editManagerAccount(m.id, { name: editName, email: editEmail });
+                        if (r.ok) setEditTarget(null);
+                        else setRowError(r.error || "Could not update manager.");
+                      })
+                    }
+                    className="focus-ring rounded-lg bg-ink px-3 py-1 text-xs text-cream disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditTarget(null)}
+                    className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <p className="text-ink">
+                    {m.name} {m.id === currentUserId && <span className="text-xs text-charcoal/40">(you)</span>}
+                  </p>
+                  <p className="text-xs text-charcoal/50">
+                    {m.email} {!m.active && <span className="text-alert">· Deactivated</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => startEdit(m)}
+                    className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                  >
+                    Edit
+                  </button>
+                  {m.id !== currentUserId && (
+                    <button
+                      disabled={isPending}
+                      onClick={() =>
+                        startTransition(async () => {
+                          const r = await setManagerActive(m.id, !m.active);
+                          if (!r.ok) setRowError(r.error || "Could not update manager.");
+                        })
+                      }
+                      className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
+                    >
+                      {m.active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </li>
         ))}
       </ul>
+      {rowError && !editTarget && <p className="mb-3 text-sm text-alert">{rowError}</p>}
 
       {!open ? (
         <button

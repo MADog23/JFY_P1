@@ -24,6 +24,13 @@ enum OrderStatus {
   IN_PROGRESS // at least one item not yet completed
   SEALED // every item COMPLETED (or PICKED_UP) — read-only until a manager reopens an item
   PICKED_UP // every item has been picked up — order fully closed
+  // A manager's soft-cancel for an order that should never have existed (duplicate
+  // intake, wrong client, a test ticket) — see actions/orders.ts:cancelOrder. Sticky:
+  // recomputeOrderStatus (lib/order-status.ts) never overwrites this from item status
+  // changes; only uncancelOrder recomputes it back to a live status. Deliberately not a
+  // delete — the order, its items, notes, and audit trail all survive untouched and
+  // reversible, consistent with how nothing else in this app is ever truly erased.
+  CANCELLED
 }
 
 enum PaymentStatus {
@@ -71,6 +78,7 @@ model User {
   priceLinesUpdated PriceLine[]  @relation("PriceLineUpdatedBy")
   itemsAssignedToMe OrderItem[]  @relation("ItemAssignedTo")
   itemsAssignedByMe OrderItem[]  @relation("ItemAssignedBy")
+  itemsRemovedByMe  OrderItem[]  @relation("ItemRemovedBy")
 }
 
 model Order {
@@ -159,6 +167,17 @@ model OrderItem {
   assignedBy   User?     @relation("ItemAssignedBy", fields: [assignedById], references: [id])
   assignedAt   DateTime?
 
+  // Soft-removal for an item added entirely by mistake (duplicate, wrong garment) — see
+  // actions/items.ts:removeItem. Only ever settable while status is PENDING or
+  // IN_PROGRESS (never on a COMPLETED/PICKED_UP item — at that point it's real
+  // operational history, not a data-entry mistake, and updateItemIntake is the right
+  // tool to fix its details instead). A removed item's notes/measurements/price lines
+  // are untouched and stay visible to a manager; it's just hidden from the public
+  // tracking page and excluded from status computation and analytics.
+  removedAt    DateTime?
+  removedById  String?
+  removedBy    User?     @relation("ItemRemovedBy", fields: [removedById], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -173,8 +192,14 @@ model OrderItem {
   @@index([assignedToId])
 }
 
-// Append-only working-profile notes. Never edited or deleted, only added to,
-// so the log itself is the record of who said what and when.
+// Working-profile notes for employees. Not strictly append-only: the author can
+// correct their own note (typo, wrong measurement jotted down in the moment), and a
+// manager can correct or remove anyone's — see actions/items.ts:editItemNote/
+// deleteItemNote. Unlike AuditLog these are informal working text, not an
+// accountability trail of actions taken, so a free-form correction path makes sense
+// here. What preserves reliability isn't a lock on who can edit — it's that every
+// edit/delete is itself audit-logged with the note's previous text, so nothing is
+// ever silently rewritten even by its own author.
 model ItemNote {
   id          String    @id @default(cuid())
   orderItemId String

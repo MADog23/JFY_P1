@@ -2,6 +2,7 @@ const ORDER_STYLES: Record<string, string> = {
   IN_PROGRESS: "bg-brass/15 text-thread border-brass/40",
   SEALED: "bg-sage/15 text-sage border-sage/40",
   PICKED_UP: "bg-charcoal/10 text-charcoal border-charcoal/30",
+  CANCELLED: "bg-alert/10 text-alert border-alert/40",
 };
 
 const ITEM_STYLES: Record<string, string> = {
@@ -17,6 +18,7 @@ const LABELS: Record<string, string> = {
   PICKED_UP: "Picked up",
   PENDING: "Not started",
   COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
 };
 
 export function StatusBadge({ status, kind = "order" }: { status: string; kind?: "order" | "item" }) {

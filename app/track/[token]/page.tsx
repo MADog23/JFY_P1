@@ -15,6 +15,7 @@ const ORDER_LABELS: Record<string, string> = {
   IN_PROGRESS: "In progress",
   SEALED: "Ready for pickup",
   PICKED_UP: "Fully picked up",
+  CANCELLED: "Cancelled",
 };
 
 export default async function TrackPage({ params }: { params: { token: string } }) {

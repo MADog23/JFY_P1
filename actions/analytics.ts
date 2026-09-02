@@ -6,11 +6,19 @@ import { requireManager } from "@/lib/auth";
 export async function getAnalytics() {
   await requireManager();
 
+  // NOT_CANCELLED shows up across most of the queries below — every "how many orders /
+  // how much revenue / how long did things take" stat excludes an order a manager
+  // soft-cancelled as a mistake (duplicate intake, wrong client, a test ticket), so a
+  // handful of cleaned-up accidents can't quietly skew what's supposed to be real shop
+  // performance. orderStatusCounts is the deliberate exception — that's the one place
+  // CANCELLED should show up, as its own labeled bucket.
+  const NOT_CANCELLED = { not: "CANCELLED" as const };
+
   const [orderStatusCounts, itemStatusCounts, paymentCounts, overdue, recentSealed, totalOrders, revenue] =
     await Promise.all([
       db.order.groupBy({ by: ["status"], _count: true }),
-      db.orderItem.groupBy({ by: ["status"], _count: true }),
-      db.order.groupBy({ by: ["paymentStatus"], _count: true }),
+      db.orderItem.groupBy({ by: ["status"], _count: true, where: { removedAt: null } }),
+      db.order.groupBy({ by: ["paymentStatus"], _count: true, where: { status: NOT_CANCELLED } }),
       db.order.count({
         where: { dueDate: { lt: new Date() }, status: { in: ["IN_PROGRESS"] } },
       }),
@@ -20,10 +28,14 @@ export async function getAnalytics() {
         orderBy: { sealedAt: "desc" },
         take: 200,
       }),
-      db.order.count(),
+      db.order.count({ where: { status: NOT_CANCELLED } }),
       // Pricing is a manager-only surface end to end, so it's safe to aggregate raw
       // totals here — this whole action is already gated by requireManager() above.
-      db.order.aggregate({ _sum: { totalPriceCents: true }, _avg: { totalPriceCents: true } }),
+      db.order.aggregate({
+        where: { status: NOT_CANCELLED },
+        _sum: { totalPriceCents: true },
+        _avg: { totalPriceCents: true },
+      }),
     ]);
 
   const turnaroundDays = recentSealed
@@ -42,15 +54,21 @@ export async function getAnalytics() {
   // further. One query, reduced four ways in JS rather than four separate queries.
   const [priceLines, inProgressOrders] = await Promise.all([
     db.priceLine.findMany({
+      where: { order: { status: NOT_CANCELLED } },
       select: { amountCents: true, source: true, description: true, orderItem: { select: { garmentType: true } } },
     }),
     db.order.findMany({
+      // status: "IN_PROGRESS" already excludes CANCELLED (it's a different value
+      // entirely), so no NOT_CANCELLED needed on the order itself here.
       where: { status: "IN_PROGRESS" },
       select: {
         id: true,
         orderNumber: true,
         clientName: true,
         items: {
+          // A soft-removed item was a mistake, not a garment still waiting on
+          // pricing — it shouldn't show up as a "needs pricing" gap.
+          where: { removedAt: null },
           select: {
             alterations: true,
             // Only ALTERATION-sourced lines count toward "did every checked box get
@@ -139,17 +157,18 @@ export async function getAnalytics() {
     startedItems,
   ] = await Promise.all([
     db.order.findMany({
-      where: { createdAt: { gte: trendWindowStart } },
+      where: { createdAt: { gte: trendWindowStart }, status: NOT_CANCELLED },
       select: { createdAt: true, totalPriceCents: true },
     }),
     db.order.findMany({
-      where: { sealedAt: { gte: trendWindowStart } },
+      where: { sealedAt: { gte: trendWindowStart }, status: NOT_CANCELLED },
       select: { createdAt: true, sealedAt: true },
     }),
     // On-time rate: every order that has both a due date and a seal date (i.e. the
-    // work is fully done, pickup notwithstanding) — all-time, not windowed.
+    // work is fully done, pickup notwithstanding) — all-time, not windowed. Excludes an
+    // order sealed and then later cancelled, same as everything else here.
     db.order.findMany({
-      where: { dueDate: { not: null }, sealedAt: { not: null } },
+      where: { dueDate: { not: null }, sealedAt: { not: null }, status: NOT_CANCELLED },
       select: { dueDate: true, sealedAt: true },
     }),
     // Pickup lag: how long a finished item sits after completion before it's
@@ -163,13 +182,31 @@ export async function getAnalytics() {
     // status COMPLETED/PICKED_UP-or-reopenedAt-not-null is how to find that
     // population rather than filtering on completedAt directly.
     db.orderItem.findMany({
-      where: { OR: [{ status: { in: ["COMPLETED", "PICKED_UP"] } }, { reopenedAt: { not: null } }] },
+      where: {
+        OR: [{ status: { in: ["COMPLETED", "PICKED_UP"] } }, { reopenedAt: { not: null } }],
+        // An item that was completed, reopened, and THEN removed as a mistake
+        // shouldn't count toward "how often does work get reopened."
+        removedAt: null,
+      },
       select: { reopenedAt: true },
     }),
-    db.order.groupBy({ by: ["createdById"], _count: true }),
+    db.order.groupBy({ by: ["createdById"], _count: true, where: { status: NOT_CANCELLED } }),
+    // completedById/authorizedById: an item can only reach COMPLETED/PICKED_UP while NOT
+    // removed (removeItem refuses once an item is past IN_PROGRESS — see
+    // actions/items.ts), so these two are structurally unaffected by item removal. Left
+    // un-filtered by order cancellation too: an order being cancelled AFTER an item was
+    // fully completed and picked up is a rare enough edge case that it's not worth the
+    // extra join here, unlike the revenue/volume stats above where it's a real,
+    // reasonably likely way to skew a headline number.
     db.orderItem.groupBy({ by: ["completedById"], _count: true, where: { completedById: { not: null } } }),
     db.itemPickup.groupBy({ by: ["authorizedById"], _count: true }),
-    db.orderItem.groupBy({ by: ["assignedToId"], _count: true, where: { assignedToId: { not: null } } }),
+    db.orderItem.groupBy({
+      by: ["assignedToId"],
+      _count: true,
+      // Matches the same "assigned to me" definition used in actions/orders.ts's
+      // listOrders — a removed item's stale assignment shouldn't inflate anyone's count.
+      where: { assignedToId: { not: null }, removedAt: null },
+    }),
     db.user.findMany({ where: { active: true }, select: { id: true, name: true, role: true } }),
     // Time to full payment: AuditLog has no structured old/new-value fields, so this
     // matches the exact summary text updatePaymentStatus writes — if that wording
@@ -181,16 +218,19 @@ export async function getAnalytics() {
       where: {
         action: "PAYMENT_STATUS_CHANGED",
         summary: { contains: "set to PAID by" },
-        order: { paymentStatus: "PAID" },
+        order: { paymentStatus: "PAID", status: NOT_CANCELLED },
       },
       select: { orderId: true, createdAt: true, order: { select: { createdAt: true } } },
       orderBy: { createdAt: "asc" },
     }),
-    db.order.groupBy({ by: ["isRush"], _count: true }),
+    db.order.groupBy({ by: ["isRush"], _count: true, where: { status: NOT_CANCELLED } }),
     // Cycle time (intake -> first work): bounded like avgTurnaroundDays above so this
     // stays a snapshot of recent activity rather than scanning the whole table.
+    // removedAt: null matters here specifically — an item can be started (startedAt
+    // set) and then removed as a duplicate/mistake before ever completing, which would
+    // otherwise drag "avg days to start work" toward a stray removed item's numbers.
     db.orderItem.findMany({
-      where: { startedAt: { not: null } },
+      where: { startedAt: { not: null }, removedAt: null },
       select: { createdAt: true, startedAt: true },
       orderBy: { startedAt: "desc" },
       take: 300,

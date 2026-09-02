@@ -6,6 +6,8 @@ import {
   setItemStatus,
   reopenItem,
   addItemNote,
+  editItemNote,
+  deleteItemNote,
   upsertMeasurement,
   deleteMeasurement,
   addImagePlaceholder,
@@ -15,6 +17,8 @@ import {
   claimItem,
   assignItem,
   releaseItem,
+  removeItem,
+  restoreItem,
 } from "@/actions/items";
 import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
 import { formatCents } from "@/lib/money";
@@ -43,6 +47,8 @@ export default function ItemCard({
   const [showPickupForm, setShowPickupForm] = useState(false);
   const [editingIntake, setEditingIntake] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editNoteTarget, setEditNoteTarget] = useState<string | null>(null);
+  const [editNoteBody, setEditNoteBody] = useState("");
 
   const locked = item.status === "COMPLETED" || item.status === "PICKED_UP";
 
@@ -52,6 +58,39 @@ export default function ItemCard({
       const result = await fn();
       if (!result.ok) setError(result.error || "Something went wrong.");
     });
+  }
+
+  // Soft-removed (see actions/items.ts:removeItem) — a data-entry mistake, not real
+  // work, so it's shown greyed-out with everything but a manager's Restore collapsed
+  // away rather than as a normal working item.
+  if (item.removedAt) {
+    return (
+      <div className="rounded-2xl border border-dashed border-linen bg-cream/50 p-5 opacity-60">
+        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-charcoal/40">{item.garmentType}</p>
+            <p className="font-display text-lg text-charcoal/60 line-through">{item.description}</p>
+          </div>
+          <span className="rounded-full border border-linen bg-white px-2.5 py-1 text-xs font-medium text-charcoal/50">
+            Removed
+          </span>
+        </div>
+        <p className="mb-3 text-xs text-charcoal/50">
+          Removed {new Date(item.removedAt).toLocaleString()}
+          {item.removedBy?.name ? ` by ${item.removedBy.name}` : ""}.
+        </p>
+        {error && <p className="mb-2 text-sm text-alert">{error}</p>}
+        {role === "MANAGER" && (
+          <button
+            disabled={isPending}
+            onClick={() => run(() => restoreItem(item.id))}
+            className="focus-ring rounded-lg border border-sage/40 bg-sage/10 px-3 py-1.5 text-sm text-sage hover:bg-sage/20"
+          >
+            Restore item
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -136,12 +175,29 @@ export default function ItemCard({
           </div>
         )}
         {role === "MANAGER" && !locked && (
-          <button
-            onClick={() => setEditingIntake((s) => !s)}
-            className="focus-ring ml-auto rounded-lg border border-linen bg-cream px-3 py-1.5 text-sm text-charcoal/70 hover:bg-linen"
-          >
-            Edit item details
-          </button>
+          <>
+            <button
+              onClick={() => setEditingIntake((s) => !s)}
+              className="focus-ring ml-auto rounded-lg border border-linen bg-cream px-3 py-1.5 text-sm text-charcoal/70 hover:bg-linen"
+            >
+              Edit item details
+            </button>
+            <button
+              disabled={isPending}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Remove "${item.description}" from this order? This is reversible — a manager can restore it later.`
+                  )
+                ) {
+                  run(() => removeItem(item.id));
+                }
+              }}
+              className="focus-ring rounded-lg border border-alert/40 px-3 py-1.5 text-sm text-alert hover:bg-alert/10"
+            >
+              Remove item
+            </button>
+          </>
         )}
       </div>
 
@@ -293,14 +349,67 @@ export default function ItemCard({
           </button>
         </div>
         <ul className="space-y-1.5">
-          {item.notes?.map((n: any) => (
-            <li key={n.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
-              <p className="text-ink">{n.body}</p>
-              <p className="text-[11px] text-charcoal/40">
-                {n.author?.name} · {new Date(n.createdAt).toLocaleString()}
-              </p>
-            </li>
-          ))}
+          {item.notes?.map((n: any) =>
+            editNoteTarget === n.id ? (
+              <li key={n.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
+                <input
+                  value={editNoteBody}
+                  onChange={(e) => setEditNoteBody(e.target.value)}
+                  className="focus-ring mb-2 w-full rounded-lg border border-linen bg-white px-2 py-1 text-sm"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    disabled={isPending || !editNoteBody.trim()}
+                    onClick={() =>
+                      run(async () => {
+                        const r = await editItemNote(n.id, editNoteBody);
+                        if (r.ok) setEditNoteTarget(null);
+                        return r;
+                      })
+                    }
+                    className="focus-ring rounded-lg bg-ink px-3 py-1 text-xs text-cream disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditNoteTarget(null)}
+                    className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </li>
+            ) : (
+              <li key={n.id} className="rounded-lg bg-cream px-3 py-2 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-ink">{n.body}</p>
+                  {(role === "MANAGER" || n.authorId === currentUserId) && (
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        onClick={() => {
+                          setEditNoteTarget(n.id);
+                          setEditNoteBody(n.body);
+                        }}
+                        className="focus-ring text-[11px] text-charcoal/50 hover:text-ink"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => run(() => deleteItemNote(n.id))}
+                        className="focus-ring text-[11px] text-charcoal/50 hover:text-alert"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-charcoal/40">
+                  {n.author?.name} · {new Date(n.createdAt).toLocaleString()}
+                </p>
+              </li>
+            )
+          )}
         </ul>
       </div>
     </div>

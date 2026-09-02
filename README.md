@@ -325,6 +325,95 @@ would never hit.
   independently re-runs `requireSession()`/`requireManager()`, so even a middleware-only
   bypass wouldn't by itself have exposed page data. Still good to be patched.)
 
+## Manager correction tools
+
+A second pass, after security hardening, looking specifically for fields or records
+that were **truly locked with no correction path** — not a permissions gap, but a
+place where even a manager had no way to fix an honest mistake short of direct
+database access. Everything below follows one rule the audit surfaced: **any
+corrective action has to itself be reversible**. Nothing here permanently deletes
+anything — it's all additive to the app's existing "never truly erase, always keep
+history" philosophy (append-only notes before this, the permanent audit log, undo
+pickup).
+
+- **Cancel / restore an order** (`cancelOrder`/`uncancelOrder` in
+  `actions/orders.ts`, button on the order profile): fixes the "duplicate ticket /
+  wrong client / test order" case, which previously had no way to get an order out
+  of every list, search result, and analytics number it was skewing. Cancelling
+  sets a new sticky `OrderStatus.CANCELLED` — `recomputeOrderStatus`
+  (`lib/order-status.ts`) bails out immediately for a cancelled order rather than
+  ever silently deriving it back to something else, so nothing about touching its
+  items can accidentally un-cancel it. Only `uncancelOrder` recomputes a fresh
+  status from the order's current items. A cancelled order, its items, notes,
+  measurements, and audit trail are all untouched and still viewable — cancelling
+  only removes it from the *active* view of the business, not from the record.
+- **Remove / restore an item** (`removeItem`/`restoreItem` in `actions/items.ts`,
+  button on each item card): fixes "an item was added to the wrong order, or
+  duplicated, and needs to come off it" — previously `addItemToOrder` had no
+  undo. Only allowed while an item is still `PENDING`/`IN_PROGRESS`: once it's
+  `COMPLETED` or `PICKED_UP` it's real operational history, not a data-entry
+  mistake, and `updateItemIntake` is the right tool to fix its details instead.
+  Also refuses to remove the last remaining (non-removed) item on an order —
+  `recomputeOrderStatus` has nothing to derive a status from with zero items, so
+  cancel the whole order instead if that's really the goal. A removed item is
+  greyed out on the order profile with a one-click Restore, and is excluded from
+  order-status derivation, the "N/M items done" list counts, the public tracking
+  page, and analytics — see the exclusion pass below.
+- **Manager account correction** (`editManagerAccount`/`setManagerActive` in
+  `actions/employees.ts`, on the Staff page): a manager account's name and email
+  were previously fixed at creation forever — not even another manager could fix a
+  typo. `editManagerAccount` lets any manager fix another's name/email (checked
+  for an email conflict first); it deliberately never touches password, which
+  stays strictly self-service (`changeMyPassword`, from the security-hardening
+  pass) so one manager can never silently take over another's login.
+  `setManagerActive` mirrors the existing employee deactivate/reactivate control,
+  extended to managers, with two guardrails since getting this wrong locks
+  everyone out with no recovery path short of the database: a manager can't
+  deactivate their own account, and can't deactivate the last remaining active
+  manager account.
+- **Item note correction** (`editItemNote`/`deleteItemNote` in `actions/items.ts`,
+  Edit/Delete on each note): `ItemNote` previously had zero correction path for
+  anyone — not even its own author could fix a typo or a wrong measurement jotted
+  down in the moment. Now the note's own author can edit or delete it themselves,
+  and a manager can correct or remove *anyone's* note (an employee still can't
+  touch someone else's). This isn't a free edit, though: every edit/delete is
+  itself audit-logged with the note's previous text in the summary (`was:
+  "..."`), so nothing is ever silently rewritten, even by its own author — the
+  log always keeps what it used to say, who changed it, and when. That's the
+  actual property worth protecting; requiring a *manager specifically* to fix a
+  typo wasn't adding anything beyond that. The original author's name and
+  original timestamp are left as-is on an edit (it's a correction, not a
+  re-authoring).
+- **Garment/alteration label rename** (`renameGarmentType`/`renameAlterationType`
+  in `actions/taxonomy.ts`, the "✎" button next to each option on the Taxonomy
+  page): previously the only way to fix a misspelled option label was deactivating
+  it and adding a fresh, correctly-spelled one — leaving the typo sitting in the
+  list forever (and technically still selectable data, just hidden from new
+  intake). A rename only affects the picker going forward; existing items keep
+  whatever `garmentType`/alteration label string they were created with (it's
+  copied at intake time, not a live reference), so renaming never rewrites
+  historical tickets.
+- **Excluded from active lists and analytics**: a cancelled order or a removed
+  item now has to be excluded everywhere the app previously assumed every
+  order/item still standing was live business — the order list's status filters
+  and "assigned to me"/progress counts, the public tracking page
+  (`lib/client-view.ts`), and roughly fifteen of `getAnalytics()`'s queries in
+  `actions/analytics.ts` (revenue, order counts, payment/turnaround/reopen-rate
+  stats, team activity, etc.), each with an inline comment explaining the filter.
+  Two spots were **deliberately left un-filtered**, on purpose rather than by
+  oversight: `orderStatusCounts` still shows `CANCELLED` as its own bucket (so
+  "how many cancelled orders" is itself a visible stat), and the
+  `itemsCompletedByUser`/`pickupsAuthorizedByUser` team-activity breakdowns aren't
+  joined against order-cancellation, since an item structurally can't reach
+  `COMPLETED`/`PICKED_UP` while removed, and a real item completed before its
+  order was later cancelled is a rare edge case not worth an extra join for.
+- **Not fixed in this pass, flagged instead**: `Order.sealedById` exists in the
+  schema and is cleared on reopen, but nothing ever actually sets it when an order
+  seals — so "who sealed this" is silently always blank. Fixing it properly means
+  threading a `sealedById` through every code path that can trigger
+  `recomputeOrderStatus` (six-plus call sites), which felt disproportionate to
+  bundle into this pass. Left as a known follow-up rather than silently dropped.
+
 ## Project structure
 
 ```
@@ -339,10 +428,16 @@ actions/                  Server actions (all mutations + audit logging live her
   pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake
   track.ts                 Public (not gated): order-number + phone lookup action
   auth.ts                   Login (rate-limited), logout, changeMyPassword (self-service)
+  orders.ts                 Includes cancelOrder/uncancelOrder (MANAGER ONLY, reversible)
+  items.ts                  Includes removeItem/restoreItem and editItemNote/deleteItemNote
+                             (all MANAGER ONLY, reversible where it makes sense)
+  employees.ts               Includes editManagerAccount/setManagerActive (MANAGER ONLY)
+  taxonomy.ts                Includes renameGarmentType/renameAlterationType (MANAGER ONLY)
 lib/                      DB client, auth/session, audit log, order numbering,
                            order-status lifecycle, client-view redaction
   auth.ts                    requireSession/requireManager — re-checks `active` per request
   jwt-config.ts               Shared JWT secret/algorithm, used by lib/session.ts AND middleware.ts
+  order-status.ts             recomputeOrderStatus — CANCELLED-sticky, excludes removed items
   pricing.ts                recomputeOrderTotal — call inside any PriceLine mutation's tx
   money.ts                   formatCents / parseDollarsToCents — the only place cents<->dollars happens
   rate-limit.ts              Best-effort in-memory throttle + getClientIp() — used by
@@ -379,6 +474,13 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Assign or reassign an item to any staff member         |    No    |   Yes   |
 | Release another staff member's claim                   |    No    |   Yes   |
 | Flag an order as Rush                                  |   Yes    |   Yes   |
+| Cancel / restore an order                              |    No    |   Yes   |
+| Remove / restore an item                               |    No    |   Yes   |
+| Edit / delete your own item note                        |   Yes    |   Yes   |
+| Edit / delete another staff member's item note           |    No    |   Yes   |
+| Edit another manager's name/email                      |    No    |   Yes   |
+| Deactivate / reactivate a manager account               |    No    |   Yes (not self, not the last active manager) |
+| Rename a garment/alteration option label                |    No    |   Yes   |
 
 ## Running locally
 
@@ -407,9 +509,8 @@ prisma/seed.ts            Creates first manager login + default taxonomy
    ```
    railway run npm run db:seed
    ```
-7. Log in as that manager. There's no in-app "change my own password" yet — for now,
-   create a second manager account with the credentials you want and deactivate the
-   seeded one from the Staff page.
+7. Log in as that manager and change the password from **My account**
+   (`/manager/account`) if you're still using the seeded/printed one.
 8. Add employees and their PINs from **Staff** in the manager app.
 
 Because `start` runs migrations automatically, future schema changes just need a new

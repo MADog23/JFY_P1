@@ -10,9 +10,10 @@ import { logAudit } from "@/lib/audit";
 import { nextOrderNumber } from "@/lib/order-number";
 import { generateClientToken } from "@/lib/token";
 import { recomputeOrderTotal } from "@/lib/pricing";
+import { recomputeOrderStatus } from "@/lib/order-status";
 import type { ActionResult } from "./auth";
 
-export type OrderListFilter = "ACTIVE" | "SEALED" | "PICKED_UP" | "ALL";
+export type OrderListFilter = "ACTIVE" | "SEALED" | "PICKED_UP" | "CANCELLED" | "ALL";
 
 /**
  * `search` matches against everything captured about the client at intake — name,
@@ -39,6 +40,8 @@ export async function listOrders(params?: {
       ? { status: "IN_PROGRESS" as const }
       : filter === "SEALED"
       ? { status: "SEALED" as const }
+      : filter === "CANCELLED"
+      ? { status: "CANCELLED" as const }
       : { status: "PICKED_UP" as const };
 
   const term = search?.trim();
@@ -61,8 +64,12 @@ export async function listOrders(params?: {
   const dateWhere: Prisma.OrderWhereInput = from || to ? { createdAt: createdAtWhere } : {};
 
   // "Assigned to me": at least one item on the order is assigned to this person —
-  // matches the per-item (not per-order) nature of assignment.
-  const assigneeWhere: Prisma.OrderWhereInput = assignedToId ? { items: { some: { assignedToId } } } : {};
+  // matches the per-item (not per-order) nature of assignment. Excludes soft-removed
+  // items (actions/items.ts:removeItem) so a mistaken item that was assigned before
+  // being removed doesn't linger on someone's "assigned to me" filter.
+  const assigneeWhere: Prisma.OrderWhereInput = assignedToId
+    ? { items: { some: { assignedToId, removedAt: null } } }
+    : {};
 
   return db.order.findMany({
     where: { ...statusWhere, ...searchWhere, ...dateWhere, ...assigneeWhere },
@@ -75,7 +82,10 @@ export async function listOrders(params?: {
       dueDate: true,
       createdAt: true,
       isRush: true,
-      items: { select: { status: true } },
+      // Excludes soft-removed items (see OrderItem.removedAt) so the list's "N/M items
+      // done" progress count matches what a manager sees on the order itself, not a
+      // count padded by items that were removed as mistakes.
+      items: { where: { removedAt: null }, select: { status: true } },
     },
     take: 100,
   });
@@ -109,6 +119,7 @@ export async function getOrderDetail(orderId: string) {
           pickup: { include: { authorizedBy: { select: { name: true } } } },
           assignedTo: { select: { id: true, name: true } },
           assignedBy: { select: { name: true } },
+          removedBy: { select: { name: true } },
           priceLines: {
             include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
             orderBy: { createdAt: "asc" },
@@ -355,6 +366,71 @@ export async function updatePaymentStatus(
     performedById: session.userId,
   });
 
+  revalidatePath(`/manager/orders/${orderId}`);
+  revalidatePath(`/employee/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * MANAGER ONLY: soft-cancels an order that should never have existed (duplicate
+ * intake, wrong client, a test ticket) — see the OrderStatus.CANCELLED comment in
+ * schema.prisma for what this does and doesn't touch. Reversible: see uncancelOrder.
+ */
+export async function cancelOrder(orderId: string, reason?: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const order = await db.order.findUnique({ where: { id: orderId } });
+  if (!order) return { ok: false, error: "Order not found." };
+  if (order.status === "CANCELLED") return { ok: true };
+
+  await db.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+
+  await logAudit({
+    orderId,
+    entityType: "ORDER",
+    entityId: orderId,
+    action: "ORDER_CANCELLED",
+    summary: `Order ${order.orderNumber} cancelled by ${session.name}${reason?.trim() ? ` — ${reason.trim()}` : ""}.`,
+    performedById: session.userId,
+  });
+
+  revalidatePath("/manager");
+  revalidatePath("/employee");
+  revalidatePath(`/manager/orders/${orderId}`);
+  revalidatePath(`/employee/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * MANAGER ONLY: undoes an accidental cancellation. Recomputes the order's status fresh
+ * from its (non-removed) items' current state — the same derivation every other status
+ * change goes through — rather than just restoring whatever status it happened to be
+ * before cancelling, since work could in principle have been queued up in the meantime.
+ */
+export async function uncancelOrder(orderId: string): Promise<ActionResult> {
+  const session = await requireManager();
+  const order = await db.order.findUnique({ where: { id: orderId } });
+  if (!order) return { ok: false, error: "Order not found." };
+  if (order.status !== "CANCELLED") return { ok: false, error: "This order isn't cancelled." };
+
+  await db.$transaction(async (tx) => {
+    // recomputeOrderStatus bails out immediately for a CANCELLED order (see
+    // lib/order-status.ts), so flip it to IN_PROGRESS first as a neutral starting point
+    // for the same derivation every other action already relies on.
+    await tx.order.update({ where: { id: orderId }, data: { status: "IN_PROGRESS" } });
+    await recomputeOrderStatus(orderId, tx);
+  });
+
+  await logAudit({
+    orderId,
+    entityType: "ORDER",
+    entityId: orderId,
+    action: "ORDER_UNCANCELLED",
+    summary: `Order ${order.orderNumber} restored from cancelled by ${session.name}.`,
+    performedById: session.userId,
+  });
+
+  revalidatePath("/manager");
+  revalidatePath("/employee");
   revalidatePath(`/manager/orders/${orderId}`);
   revalidatePath(`/employee/orders/${orderId}`);
   return { ok: true };

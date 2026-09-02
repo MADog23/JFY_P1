@@ -30,6 +30,10 @@ export async function getPublicOrderView(token: string) {
       dueDate: true,
       createdAt: true,
       items: {
+        // Excludes soft-removed items (OrderItem.removedAt, see actions/items.ts's
+        // removeItem) — an item a manager removed as a data-entry mistake shouldn't
+        // still appear on the client's tracking page.
+        where: { removedAt: null },
         select: {
           id: true,
           garmentType: true,

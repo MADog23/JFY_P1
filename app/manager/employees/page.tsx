@@ -15,7 +15,7 @@ export default async function EmployeesPage() {
         <p className="mb-6 text-sm text-charcoal/60">
           Manage employee PIN logins and manager credentials.
         </p>
-        <StaffManager employees={employees} managers={managers} />
+        <StaffManager employees={employees} managers={managers} currentUserId={session.userId} />
       </main>
     </>
   );

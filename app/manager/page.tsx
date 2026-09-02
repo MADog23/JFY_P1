@@ -61,6 +61,7 @@ export default async function ManagerDashboard({
             ["ACTIVE", "In progress"],
             ["SEALED", "Ready for pickup"],
             ["PICKED_UP", "Picked up"],
+            ["CANCELLED", "Cancelled"],
             ["ALL", "All"],
           ].map(([value, label]) => (
             <Link

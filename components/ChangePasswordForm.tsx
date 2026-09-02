@@ -36,20 +36,22 @@ export default function ChangePasswordForm() {
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-linen bg-white p-6 shadow-sm">
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="current-password" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         Current password
       </label>
       <input
+        id="current-password"
         type="password"
         required
         value={currentPassword}
         onChange={(e) => setCurrentPassword(e.target.value)}
         className="focus-ring mb-4 w-full rounded-lg border border-linen px-3 py-2 text-sm"
       />
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="new-password" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         New password
       </label>
       <input
+        id="new-password"
         type="password"
         required
         value={newPassword}
@@ -57,10 +59,11 @@ export default function ChangePasswordForm() {
         placeholder="At least 8 characters"
         className="focus-ring mb-4 w-full rounded-lg border border-linen px-3 py-2 text-sm"
       />
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="confirm-new-password" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         Confirm new password
       </label>
       <input
+        id="confirm-new-password"
         type="password"
         required
         value={confirmPassword}

@@ -2,6 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireManager } from "@/lib/auth";
@@ -44,16 +45,21 @@ export async function createEmployee(name: string, pin: string): Promise<ActionR
   const pinCheck = pinSchema.safeParse(pin);
   if (!pinCheck.success) return { ok: false, error: pinCheck.error.issues[0].message };
 
-  const user = await db.user.create({
-    data: { name: name.trim(), role: "EMPLOYEE", pinHash: await bcrypt.hash(pin, 10), active: true },
-  });
+  await db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: { name: name.trim(), role: "EMPLOYEE", pinHash: await bcrypt.hash(pin, 10), active: true },
+    });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: user.id,
-    action: "EMPLOYEE_CREATED",
-    summary: `Employee "${user.name}" added by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: user.id,
+        action: "EMPLOYEE_CREATED",
+        summary: `Employee "${user.name}" added by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");
@@ -68,14 +74,19 @@ export async function resetEmployeePin(employeeId: string, newPin: string): Prom
   const employee = await db.user.findUnique({ where: { id: employeeId } });
   if (!employee || employee.role !== "EMPLOYEE") return { ok: false, error: "Employee not found." };
 
-  await db.user.update({ where: { id: employeeId }, data: { pinHash: await bcrypt.hash(newPin, 10) } });
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: employeeId }, data: { pinHash: await bcrypt.hash(newPin, 10) } });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: employeeId,
-    action: "EMPLOYEE_PIN_RESET",
-    summary: `PIN reset for "${employee.name}" by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: employeeId,
+        action: "EMPLOYEE_PIN_RESET",
+        summary: `PIN reset for "${employee.name}" by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");
@@ -96,14 +107,19 @@ export async function renameEmployee(employeeId: string, newName: string): Promi
 
   if (trimmed === employee.name) return { ok: true };
 
-  await db.user.update({ where: { id: employeeId }, data: { name: trimmed } });
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: employeeId }, data: { name: trimmed } });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: employeeId,
-    action: "EMPLOYEE_RENAMED",
-    summary: `"${employee.name}" renamed to "${trimmed}" by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: employeeId,
+        action: "EMPLOYEE_RENAMED",
+        summary: `"${employee.name}" renamed to "${trimmed}" by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");
@@ -115,14 +131,19 @@ export async function setEmployeeActive(employeeId: string, active: boolean): Pr
   const employee = await db.user.findUnique({ where: { id: employeeId } });
   if (!employee || employee.role !== "EMPLOYEE") return { ok: false, error: "Employee not found." };
 
-  await db.user.update({ where: { id: employeeId }, data: { active } });
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: employeeId }, data: { active } });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: employeeId,
-    action: active ? "EMPLOYEE_REACTIVATED" : "EMPLOYEE_DEACTIVATED",
-    summary: `"${employee.name}" ${active ? "reactivated" : "deactivated"} by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: employeeId,
+        action: active ? "EMPLOYEE_REACTIVATED" : "EMPLOYEE_DEACTIVATED",
+        summary: `"${employee.name}" ${active ? "reactivated" : "deactivated"} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");
@@ -161,15 +182,27 @@ export async function editManagerAccount(
 
   if (name === manager.name && email === manager.email) return { ok: true };
 
-  await db.user.update({ where: { id: managerId }, data: { name, email } });
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: managerId }, data: { name, email } });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: managerId,
-    action: "MANAGER_EDITED",
-    summary: `Manager account "${manager.name}" (${manager.email}) updated to "${name}" (${email}) by ${session.name}.`,
-    performedById: session.userId,
-  });
+      await logAudit(
+        {
+          entityType: "EMPLOYEE",
+          entityId: managerId,
+          action: "MANAGER_EDITED",
+          summary: `Manager account "${manager.name}" (${manager.email}) updated to "${name}" (${email}) by ${session.name}.`,
+          performedById: session.userId,
+        },
+        tx
+      );
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { ok: false, error: "That email is already in use." };
+    }
+    throw error;
+  }
 
   revalidatePath("/manager/employees");
   return { ok: true };
@@ -198,14 +231,19 @@ export async function setManagerActive(managerId: string, active: boolean): Prom
     }
   }
 
-  await db.user.update({ where: { id: managerId }, data: { active } });
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: managerId }, data: { active } });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: managerId,
-    action: active ? "MANAGER_REACTIVATED" : "MANAGER_DEACTIVATED",
-    summary: `Manager "${manager.name}" ${active ? "reactivated" : "deactivated"} by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: managerId,
+        action: active ? "MANAGER_REACTIVATED" : "MANAGER_DEACTIVATED",
+        summary: `Manager "${manager.name}" ${active ? "reactivated" : "deactivated"} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");
@@ -226,22 +264,27 @@ export async function createManager(raw: z.infer<typeof managerSchema>): Promise
   const existing = await db.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
   if (existing) return { ok: false, error: "That email is already in use." };
 
-  const user = await db.user.create({
-    data: {
-      name: parsed.data.name.trim(),
-      role: "MANAGER",
-      email: parsed.data.email.toLowerCase().trim(),
-      passwordHash: await bcrypt.hash(parsed.data.password, 10),
-      active: true,
-    },
-  });
+  await db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        name: parsed.data.name.trim(),
+        role: "MANAGER",
+        email: parsed.data.email.toLowerCase().trim(),
+        passwordHash: await bcrypt.hash(parsed.data.password, 10),
+        active: true,
+      },
+    });
 
-  await logAudit({
-    entityType: "EMPLOYEE",
-    entityId: user.id,
-    action: "MANAGER_CREATED",
-    summary: `Manager account "${user.name}" created by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        entityType: "EMPLOYEE",
+        entityId: user.id,
+        action: "MANAGER_CREATED",
+        summary: `Manager account "${user.name}" created by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager/employees");

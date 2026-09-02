@@ -414,6 +414,88 @@ pickup).
   `recomputeOrderStatus` (six-plus call sites), which felt disproportionate to
   bundle into this pass. Left as a known follow-up rather than silently dropped.
 
+## Reliability & data-integrity hardening
+
+A third pass, prompted by a full read-through looking specifically for correctness
+and scaling issues rather than missing features: places where the app would do the
+wrong thing under concurrent use, silently disagree with its own audit trail, or
+just get slower as real order history piles up. Nothing here changes what any
+action does when used one request at a time — it's all about what happens when two
+people click at once, or when a write to the database and its audit-log entry
+could disagree about whether something actually happened.
+
+- **Cancelled orders and removed items are now actually frozen.** Before this
+  pass, `cancelOrder`/`removeItem` (above) recorded the cancellation/removal, but
+  nothing stopped further "new work" mutations from still landing on a cancelled
+  order or a removed item — editing its intake details, adding notes, changing
+  status, adding price lines, and so on all still silently succeeded, which
+  undercut the whole point of cancelling something. Every action that does *new*
+  work (`updateItemIntake`, `setItemStatus`, `reopenItem`, `addItemNote`,
+  `upsertMeasurement`, `addImagePlaceholder`, `authorizeItemPickup`, `claimItem`,
+  `assignItem`, `addItemToOrder` in `actions/items.ts`; `updateOrderIntake`,
+  `updateGeneralNotes`, `updatePaymentStatus` in `actions/orders.ts`;
+  `addPriceLine` in `actions/pricing.ts`) now checks first and refuses with a
+  plain-language error if the order is cancelled or, for item-level actions, the
+  item itself is removed. Actions that *correct or reverse* existing state
+  (`editItemNote`/`deleteItemNote`, `deleteMeasurement`, `restoreItem`,
+  `undoItemPickup`, `releaseItem`, `updatePriceLine`/`deletePriceLine`) are
+  deliberately left open on a cancelled order — the same "a correction should
+  always be possible" reasoning as the correction tools themselves. `cancelOrder`/
+  `removeItem` stay reversible either way.
+- **Audit log writes are now atomic with the change they describe.** `lib/audit.ts`
+  has always said mutations shouldn't be able to succeed if their audit entry
+  fails to write — but several actions across `actions/items.ts`,
+  `actions/orders.ts`, and `actions/pricing.ts` called `logAudit` in a separate
+  statement *after* their `db.$transaction` had already committed, so a crash or
+  DB hiccup between the two could leave a real change with no audit trail at all.
+  Every mutating action in those three files now does its data change and its
+  `logAudit` call inside the same `$transaction`, passing the transaction client
+  through — either both happen or neither does.
+- **Two race conditions fixed, both confirmed against real concurrent Postgres
+  transactions (not just read by eye):**
+  - `claimItem` (`actions/items.ts`) used to read the item, check it was
+    unassigned, then write — two people tapping "Claim" on the same item at
+    nearly the same moment could both pass the check and both "win." It's now a
+    single atomic `updateMany({ where: { id, assignedToId: null }, ... })` and
+    checks the affected-row count; a stress test of 20 concurrent claim pairs
+    against a scratch database produced exactly one winner and one no-op every
+    time, zero double-claims.
+  - `removeItem` (`actions/items.ts`) refuses to remove an order's last active
+    item, but the check-then-delete was two separate statements — two managers
+    removing the last two items at once could each see "one other item still
+    active" and both proceed, leaving zero. The transaction now runs at
+    `Serializable` isolation, and a scratch-database test that forced two such
+    removals to overlap confirmed Postgres itself aborts the loser with a
+    serialization failure (Prisma's `P2034`) rather than letting both through;
+    `removeItem` catches that specific error and returns "that order changed at
+    the same time — please try again."
+- **Order search now has real indexes behind it.** `listOrders`'s search box
+  matches client name/phone/email, pickup contact name/phone, and order number
+  with a case-insensitive substring match — which a plain index can't serve, so
+  every search was a full table scan. A new migration
+  (`prisma/migrations/20260902010000_add_trigram_search_indexes`) enables
+  Postgres's `pg_trgm` extension and adds a GIN trigram index on each of those
+  six columns; verified against a scratch database (20k+ seeded rows) that the
+  indexed and un-indexed query plans return identical result counts. Raw SQL,
+  not expressed in `schema.prisma` — Prisma's DSL only gets GIN/trigram support
+  behind a preview feature this app doesn't otherwise need for one search box.
+- **Order lists are now paginated instead of hard-capped at 100.** `listOrders`
+  used to silently `take: 100` and stop — past that, older orders just
+  disappeared from every filter view with no indication anything was cut off.
+  It now takes `page`/`pageSize` (default 25, capped at 100) and returns
+  `{ orders, total, page, pageSize, hasMore }`; the manager and employee
+  dashboards read/write `page` as a URL query param alongside the existing
+  filter/search/mine params, with a "Showing X–Y of N" line and Previous/Next
+  links. Changing the status tab, the "assigned to me" toggle, or the search box
+  all reset back to page 1, since whatever page you were on no longer means
+  anything once the underlying result set changes.
+- **`getOrderDetail` no longer fetches an item's notes/images unbounded.** Same
+  shape of issue as the order list: nothing stops an item from accumulating a
+  very large number of notes or photos over a long-running order, and every one
+  of them was being fetched on every page load. Capped at 100 notes and 50
+  images per item (most-recent-first, matching how the UI already orders them —
+  same pattern the audit log already used with its own `take: 50`).
+
 ## Project structure
 
 ```
@@ -425,12 +507,18 @@ app/                      Next.js App Router pages
   track/[token]/           Public read-only client tracking page
   track/page.tsx           Public order-number + phone lookup page (routes into the above)
 actions/                  Server actions (all mutations + audit logging live here)
-  pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake
+  pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake;
+                             addPriceLine guards against a cancelled order/removed item
   track.ts                 Public (not gated): order-number + phone lookup action
   auth.ts                   Login (rate-limited), logout, changeMyPassword (self-service)
-  orders.ts                 Includes cancelOrder/uncancelOrder (MANAGER ONLY, reversible)
-  items.ts                  Includes removeItem/restoreItem and editItemNote/deleteItemNote
-                             (all MANAGER ONLY, reversible where it makes sense)
+  orders.ts                 listOrders takes page/pageSize, returns { orders, total,
+                             page, pageSize, hasMore }. Includes cancelOrder/uncancelOrder
+                             (MANAGER ONLY, reversible)
+  items.ts                  Includes removeItem/restoreItem (MANAGER ONLY, reversible;
+                             removeItem runs Serializable to avoid a last-item race) and
+                             editItemNote/deleteItemNote (self-author-or-manager, always
+                             audit-logged — see "Manager correction tools" below).
+                             "New work" actions refuse a cancelled order/removed item.
   employees.ts               Includes editManagerAccount/setManagerActive (MANAGER ONLY)
   taxonomy.ts                Includes renameGarmentType/renameAlterationType (MANAGER ONLY)
 lib/                      DB client, auth/session, audit log, order numbering,
@@ -444,11 +532,13 @@ lib/                      DB client, auth/session, audit log, order numbering,
                               actions/track.ts and actions/auth.ts's login throttling
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
   PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
-  OrderSearchBar.tsx         Client + date-range search box for the employee/manager order lists
+  OrderSearchBar.tsx         Client + date-range search box for the employee/manager order
+                               lists; resets the page query param on every new search
   ItemCard.tsx                Includes the ItemAssignment control (claim / assign / release)
   ChangePasswordForm.tsx      Used by app/manager/account
 prisma/schema.prisma      Full data model
-prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`)
+prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`), including
+                            a raw-SQL migration adding pg_trgm trigram search indexes
 prisma/seed.ts            Creates first manager login + default taxonomy
 ```
 

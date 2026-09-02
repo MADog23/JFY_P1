@@ -37,10 +37,12 @@ export async function addPriceLine(
 
   const order = await db.order.findUnique({ where: { id: orderId } });
   if (!order) return { ok: false, error: "Order not found." };
+  if (order.status === "CANCELLED") return { ok: false, error: "This order is cancelled." };
 
   if (orderItemId) {
     const item = await db.orderItem.findUnique({ where: { id: orderItemId } });
     if (!item || item.orderId !== orderId) return { ok: false, error: "Item not found on this order." };
+    if (item.removedAt) return { ok: false, error: "This item has been removed." };
   }
 
   await db.$transaction(async (tx) => {
@@ -55,15 +57,17 @@ export async function addPriceLine(
       },
     });
     await recomputeOrderTotal(orderId, tx);
-  });
-
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "PRICE_LINE_ADDED",
-    summary: `Price line "${parsed.data.description.trim()}" ($${(parsed.data.amountCents / 100).toFixed(2)}) added to ${order.orderNumber} by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "PRICE_LINE_ADDED",
+        summary: `Price line "${parsed.data.description.trim()}" ($${(parsed.data.amountCents / 100).toFixed(2)}) added to ${order.orderNumber} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidateOrder(orderId);
@@ -92,15 +96,17 @@ export async function updatePriceLine(
       },
     });
     await recomputeOrderTotal(existing.orderId, tx);
-  });
-
-  await logAudit({
-    orderId: existing.orderId,
-    entityType: "ORDER",
-    entityId: existing.orderId,
-    action: "PRICE_LINE_EDITED",
-    summary: `Price line "${existing.description}" changed to "${parsed.data.description.trim()}" ($${(parsed.data.amountCents / 100).toFixed(2)}) by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        orderId: existing.orderId,
+        entityType: "ORDER",
+        entityId: existing.orderId,
+        action: "PRICE_LINE_EDITED",
+        summary: `Price line "${existing.description}" changed to "${parsed.data.description.trim()}" ($${(parsed.data.amountCents / 100).toFixed(2)}) by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidateOrder(existing.orderId);
@@ -115,15 +121,17 @@ export async function deletePriceLine(priceLineId: string): Promise<ActionResult
   await db.$transaction(async (tx) => {
     await tx.priceLine.delete({ where: { id: priceLineId } });
     await recomputeOrderTotal(existing.orderId, tx);
-  });
-
-  await logAudit({
-    orderId: existing.orderId,
-    entityType: "ORDER",
-    entityId: existing.orderId,
-    action: "PRICE_LINE_DELETED",
-    summary: `Price line "${existing.description}" ($${(existing.amountCents / 100).toFixed(2)}) removed by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        orderId: existing.orderId,
+        entityType: "ORDER",
+        entityId: existing.orderId,
+        action: "PRICE_LINE_DELETED",
+        summary: `Price line "${existing.description}" ($${(existing.amountCents / 100).toFixed(2)}) removed by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidateOrder(existing.orderId);

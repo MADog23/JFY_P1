@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { StatusBadge } from "./StatusBadge";
 import ItemCard from "./ItemCard";
 import { PriceLineRow, AddPriceLineForm } from "./PriceLineEditor";
@@ -234,10 +234,14 @@ function LabeledInput({
   onChange: (v: string) => void;
   type?: string;
 }) {
+  const id = useId();
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">{label}</label>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+        {label}
+      </label>
       <input
+        id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -338,7 +342,7 @@ function GeneralNotesAndPayment({ order, role }: { order: any; role: "EMPLOYEE" 
             Order total <span className="font-display text-base text-ink">{formatCents(order.totalPriceCents)}</span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(["UNPAID", "DEPOSIT_PAID", "PAID"] as const).map((status) => (
             <button
               key={status}

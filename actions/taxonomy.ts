@@ -29,13 +29,18 @@ export async function addGarmentType(label: string): Promise<ActionResult> {
   const session = await requireManager();
   if (!label.trim()) return { ok: false, error: "Label required." };
   const count = await db.garmentTypeOption.count();
-  await db.garmentTypeOption.create({ data: { label: label.trim(), sortOrder: count } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: label.trim(),
-    action: "GARMENT_TYPE_ADDED",
-    summary: `Garment type "${label.trim()}" added by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.garmentTypeOption.create({ data: { label: label.trim(), sortOrder: count } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: label.trim(),
+        action: "GARMENT_TYPE_ADDED",
+        summary: `Garment type "${label.trim()}" added by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };
@@ -45,13 +50,18 @@ export async function addAlterationType(label: string): Promise<ActionResult> {
   const session = await requireManager();
   if (!label.trim()) return { ok: false, error: "Label required." };
   const count = await db.alterationTypeOption.count();
-  await db.alterationTypeOption.create({ data: { label: label.trim(), sortOrder: count } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: label.trim(),
-    action: "ALTERATION_TYPE_ADDED",
-    summary: `Alteration type "${label.trim()}" added by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.alterationTypeOption.create({ data: { label: label.trim(), sortOrder: count } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: label.trim(),
+        action: "ALTERATION_TYPE_ADDED",
+        summary: `Alteration type "${label.trim()}" added by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };
@@ -74,13 +84,18 @@ export async function renameGarmentType(id: string, label: string): Promise<Acti
   const conflict = await db.garmentTypeOption.findUnique({ where: { label: trimmed } });
   if (conflict) return { ok: false, error: "A garment type with that label already exists." };
 
-  await db.garmentTypeOption.update({ where: { id }, data: { label: trimmed } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: id,
-    action: "GARMENT_TYPE_RENAMED",
-    summary: `Garment type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.garmentTypeOption.update({ where: { id }, data: { label: trimmed } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: id,
+        action: "GARMENT_TYPE_RENAMED",
+        summary: `Garment type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };
@@ -99,13 +114,18 @@ export async function renameAlterationType(id: string, label: string): Promise<A
   const conflict = await db.alterationTypeOption.findUnique({ where: { label: trimmed } });
   if (conflict) return { ok: false, error: "An alteration type with that label already exists." };
 
-  await db.alterationTypeOption.update({ where: { id }, data: { label: trimmed } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: id,
-    action: "ALTERATION_TYPE_RENAMED",
-    summary: `Alteration type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.alterationTypeOption.update({ where: { id }, data: { label: trimmed } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: id,
+        action: "ALTERATION_TYPE_RENAMED",
+        summary: `Alteration type "${existing.label}" renamed to "${trimmed}" by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };
@@ -113,13 +133,18 @@ export async function renameAlterationType(id: string, label: string): Promise<A
 
 export async function toggleGarmentType(id: string, active: boolean): Promise<ActionResult> {
   const session = await requireManager();
-  const opt = await db.garmentTypeOption.update({ where: { id }, data: { active } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: id,
-    action: "GARMENT_TYPE_TOGGLED",
-    summary: `Garment type "${opt.label}" ${active ? "enabled" : "disabled"} by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    const opt = await tx.garmentTypeOption.update({ where: { id }, data: { active } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: id,
+        action: "GARMENT_TYPE_TOGGLED",
+        summary: `Garment type "${opt.label}" ${active ? "enabled" : "disabled"} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };
@@ -127,13 +152,18 @@ export async function toggleGarmentType(id: string, active: boolean): Promise<Ac
 
 export async function toggleAlterationType(id: string, active: boolean): Promise<ActionResult> {
   const session = await requireManager();
-  const opt = await db.alterationTypeOption.update({ where: { id }, data: { active } });
-  await logAudit({
-    entityType: "TAXONOMY",
-    entityId: id,
-    action: "ALTERATION_TYPE_TOGGLED",
-    summary: `Alteration type "${opt.label}" ${active ? "enabled" : "disabled"} by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    const opt = await tx.alterationTypeOption.update({ where: { id }, data: { active } });
+    await logAudit(
+      {
+        entityType: "TAXONOMY",
+        entityId: id,
+        action: "ALTERATION_TYPE_TOGGLED",
+        summary: `Alteration type "${opt.label}" ${active ? "enabled" : "disabled"} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
   revalidatePath("/manager/taxonomy");
   return { ok: true };

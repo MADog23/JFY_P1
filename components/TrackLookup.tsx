@@ -30,20 +30,22 @@ export default function TrackLookup() {
         </div>
 
         <form onSubmit={submit} className="rounded-2xl border border-linen bg-white p-6 shadow-sm">
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+          <label htmlFor="track-order-number" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
             Order number
           </label>
           <input
+            id="track-order-number"
             required
             value={orderNumber}
             onChange={(e) => setOrderNumber(e.target.value)}
             placeholder="JFY-000123"
             className="focus-ring mb-4 w-full rounded-lg border border-linen bg-cream px-3 py-2 text-ink"
           />
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+          <label htmlFor="track-phone" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
             Phone number on file
           </label>
           <input
+            id="track-phone"
             required
             type="tel"
             value={phone}

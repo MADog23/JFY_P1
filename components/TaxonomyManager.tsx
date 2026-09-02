@@ -101,7 +101,17 @@ function TaxonomyList({
               }`}
             >
               <button
-                onClick={() => startTransition(async () => { await onToggle(item.id, !item.active); })}
+                onClick={() => {
+                  if (
+                    item.active &&
+                    !confirm(
+                      `Deactivate "${item.label}"? It'll be hidden from new intake, but items already using it keep the label they were given.`
+                    )
+                  ) {
+                    return;
+                  }
+                  startTransition(async () => { await onToggle(item.id, !item.active); });
+                }}
                 className={`px-3 py-1.5 ${item.active ? "" : "line-through"}`}
               >
                 {item.label}

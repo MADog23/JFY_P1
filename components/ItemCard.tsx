@@ -391,13 +391,17 @@ export default function ItemCard({
                           setEditNoteTarget(n.id);
                           setEditNoteBody(n.body);
                         }}
-                        className="focus-ring text-[11px] text-charcoal/50 hover:text-ink"
+                        className="focus-ring rounded px-2 py-1 text-[11px] text-charcoal/50 hover:text-ink"
                       >
                         Edit
                       </button>
                       <button
-                        onClick={() => run(() => deleteItemNote(n.id))}
-                        className="focus-ring text-[11px] text-charcoal/50 hover:text-alert"
+                        onClick={() => {
+                          if (confirm("Delete this note? It can't be undone from here, though the audit log keeps the original text.")) {
+                            run(() => deleteItemNote(n.id));
+                          }
+                        }}
+                        className="focus-ring rounded px-2 py-1 text-[11px] text-charcoal/50 hover:text-alert"
                       >
                         Delete
                       </button>

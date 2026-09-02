@@ -8,13 +8,21 @@ import { OrderSearchBar } from "@/components/OrderSearchBar";
 export default async function EmployeeDashboard({
   searchParams,
 }: {
-  searchParams: { filter?: string; search?: string; from?: string; to?: string; mine?: string };
+  searchParams: { filter?: string; search?: string; from?: string; to?: string; mine?: string; page?: string };
 }) {
   const session = await requireSession();
   const filter = (searchParams.filter as any) || "ACTIVE";
   const { search, from, to } = searchParams;
   const mine = searchParams.mine === "1";
-  const orders = await listOrders({ filter, search, from, to, assignedToId: mine ? session.userId : undefined });
+  const page = Math.max(parseInt(searchParams.page ?? "1", 10) || 1, 1);
+  const { orders, total, pageSize, hasMore } = await listOrders({
+    filter,
+    search,
+    from,
+    to,
+    assignedToId: mine ? session.userId : undefined,
+    page,
+  });
   const hasSearch = !!(search || from || to || mine);
 
   function tabHref(value: string) {
@@ -34,6 +42,17 @@ export default async function EmployeeDashboard({
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     if (!mine) params.set("mine", "1");
+    return `/employee?${params.toString()}`;
+  }
+
+  function pageHref(value: number) {
+    const params = new URLSearchParams();
+    params.set("filter", filter);
+    if (search) params.set("search", search);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (mine) params.set("mine", "1");
+    params.set("page", String(value));
     return `/employee?${params.toString()}`;
   }
 
@@ -99,6 +118,30 @@ export default async function EmployeeDashboard({
               : "No orders here yet."
           }
         />
+
+        {total > 0 && (total > pageSize || page > 1) && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-charcoal/60">
+            <span>
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+            </span>
+            <div className="flex gap-2">
+              {page > 1 ? (
+                <Link href={pageHref(page - 1)} className="focus-ring rounded-lg border border-linen bg-white px-3 py-1.5">
+                  Previous
+                </Link>
+              ) : (
+                <span className="rounded-lg border border-linen px-3 py-1.5 text-charcoal/30">Previous</span>
+              )}
+              {hasMore ? (
+                <Link href={pageHref(page + 1)} className="focus-ring rounded-lg border border-linen bg-white px-3 py-1.5">
+                  Next
+                </Link>
+              ) : (
+                <span className="rounded-lg border border-linen px-3 py-1.5 text-charcoal/30">Next</span>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </>
   );

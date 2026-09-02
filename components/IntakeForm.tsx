@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { createIntakeTicket } from "@/actions/orders";
 import { parseDollarsToCents, formatCents } from "@/lib/money";
 
@@ -250,10 +250,14 @@ export default function IntakeForm({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+                <label
+                  htmlFor={`item-garment-type-${index}`}
+                  className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60"
+                >
                   Garment type
                 </label>
                 <select
+                  id={`item-garment-type-${index}`}
                   required
                   value={item.garmentType}
                   onChange={(e) => updateItem(index, { garmentType: e.target.value })}
@@ -499,16 +503,16 @@ function PriceLineRow({
   onRemove?: () => void;
 }) {
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div className="flex flex-wrap items-center gap-3 py-2.5">
       {editableDescription ? (
         <input
           value={line.description}
           onChange={(e) => onChange({ description: e.target.value })}
           placeholder="Description"
-          className="focus-ring flex-1 rounded-lg border border-linen bg-cream px-3 py-2 text-sm"
+          className="focus-ring min-w-0 flex-1 rounded-lg border border-linen bg-cream px-3 py-2 text-sm"
         />
       ) : (
-        <span className="flex-1 text-sm text-ink">{line.description}</span>
+        <span className="min-w-0 flex-1 text-sm text-ink">{line.description}</span>
       )}
       <div className="flex items-center gap-1">
         <span className="text-sm text-charcoal/50">$</span>
@@ -542,12 +546,14 @@ function Field({
   required?: boolean;
   type?: string;
 }) {
+  const id = useId();
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         {label}
       </label>
       <input
+        id={id}
         type={type}
         required={required}
         value={value}

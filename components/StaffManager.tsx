@@ -95,7 +95,7 @@ function EmployeeSection({ employees }: { employees: any[] }) {
               )}
             </div>
             {renameTarget !== e.id && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 gap-y-2">
                 <button
                   onClick={() => startRename(e)}
                   className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"
@@ -257,7 +257,7 @@ function ManagerSection({ managers, currentUserId }: { managers: any[]; currentU
                     {m.email} {!m.active && <span className="text-alert">· Deactivated</span>}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 gap-y-2">
                   <button
                     onClick={() => startEdit(m)}
                     className="focus-ring rounded-lg border border-linen px-3 py-1 text-xs text-charcoal/60 hover:bg-cream"

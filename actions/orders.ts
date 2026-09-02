@@ -23,15 +23,27 @@ export type OrderListFilter = "ACTIVE" | "SEALED" | "PICKED_UP" | "CANCELLED" | 
  * i.e. when the intake ticket was made, not the due date — per the product decision
  * to search "when did this come in" rather than "when is it promised."
  */
+const DEFAULT_PAGE_SIZE = 25;
+
 export async function listOrders(params?: {
   filter?: OrderListFilter;
   search?: string;
   from?: string;
   to?: string;
   assignedToId?: string;
+  page?: number;
+  pageSize?: number;
 }) {
   await requireSession();
   const { filter, search, from, to, assignedToId } = params ?? {};
+  // Offset-based, not cursor-based: this table's ids are cuids (not sortable the way an
+  // auto-increment or ULID would be), and orderBy is createdAt not id, so a Prisma
+  // cursor here would mean carrying the last row's createdAt around as the cursor
+  // instead of just an id — offset/limit is the simpler, safer choice for a list this
+  // size (hundreds to low thousands of orders, not millions), and it's what lets the
+  // dashboard show "page 2 of 6" rather than just "load more."
+  const pageSize = Math.min(Math.max(params?.pageSize ?? DEFAULT_PAGE_SIZE, 1), 100);
+  const page = Math.max(params?.page ?? 1, 1);
 
   const statusWhere: Prisma.OrderWhereInput =
     !filter || filter === "ALL"
@@ -71,24 +83,32 @@ export async function listOrders(params?: {
     ? { items: { some: { assignedToId, removedAt: null } } }
     : {};
 
-  return db.order.findMany({
-    where: { ...statusWhere, ...searchWhere, ...dateWhere, ...assigneeWhere },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      orderNumber: true,
-      clientName: true,
-      status: true,
-      dueDate: true,
-      createdAt: true,
-      isRush: true,
-      // Excludes soft-removed items (see OrderItem.removedAt) so the list's "N/M items
-      // done" progress count matches what a manager sees on the order itself, not a
-      // count padded by items that were removed as mistakes.
-      items: { where: { removedAt: null }, select: { status: true } },
-    },
-    take: 100,
-  });
+  const where: Prisma.OrderWhereInput = { ...statusWhere, ...searchWhere, ...dateWhere, ...assigneeWhere };
+
+  const [orders, total] = await Promise.all([
+    db.order.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        orderNumber: true,
+        clientName: true,
+        status: true,
+        dueDate: true,
+        createdAt: true,
+        isRush: true,
+        // Excludes soft-removed items (see OrderItem.removedAt) so the list's "N/M items
+        // done" progress count matches what a manager sees on the order itself, not a
+        // count padded by items that were removed as mistakes.
+        items: { where: { removedAt: null }, select: { status: true } },
+      },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.order.count({ where }),
+  ]);
+
+  return { orders, total, page, pageSize, hasMore: page * pageSize < total };
 }
 
 /**
@@ -113,9 +133,14 @@ export async function getOrderDetail(orderId: string) {
       items: {
         orderBy: { createdAt: "asc" },
         include: {
-          notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+          // Capped like auditLogs below: an item's notes/images are unbounded in
+          // principle (nothing stops staff from adding more over a long-running order),
+          // so an uncapped fetch here is a page that gets slower the longer an order
+          // lives. Most recent first, same as the UI already shows them, so the cap
+          // only ever drops the oldest, least-relevant entries.
+          notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 100 },
           measurements: { include: { updatedBy: { select: { name: true } } }, orderBy: { label: "asc" } },
-          images: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+          images: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 50 },
           pickup: { include: { authorizedBy: { select: { name: true } } } },
           assignedTo: { select: { id: true, name: true } },
           assignedBy: { select: { name: true } },
@@ -299,27 +324,33 @@ export async function updateOrderIntake(
 
   const before = await db.order.findUnique({ where: { id: data.orderId } });
   if (!before) return { ok: false, error: "Order not found." };
+  if (before.status === "CANCELLED") return { ok: false, error: "This order is cancelled." };
 
-  await db.order.update({
-    where: { id: data.orderId },
-    data: {
-      clientName: data.clientName.trim(),
-      clientPhone: data.clientPhone.trim(),
-      clientEmail: data.clientEmail || null,
-      pickupContactName: data.pickupContactName || null,
-      pickupContactPhone: data.pickupContactPhone || null,
-      dueDate: data.dueDate ? new Date(data.dueDate) : null,
-      isRush: data.isRush,
-    },
-  });
+  await db.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: data.orderId },
+      data: {
+        clientName: data.clientName.trim(),
+        clientPhone: data.clientPhone.trim(),
+        clientEmail: data.clientEmail || null,
+        pickupContactName: data.pickupContactName || null,
+        pickupContactPhone: data.pickupContactPhone || null,
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        isRush: data.isRush,
+      },
+    });
 
-  await logAudit({
-    orderId: data.orderId,
-    entityType: "ORDER",
-    entityId: data.orderId,
-    action: "INTAKE_EDITED",
-    summary: `Intake details for ${before.orderNumber} edited by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        orderId: data.orderId,
+        entityType: "ORDER",
+        entityId: data.orderId,
+        action: "INTAKE_EDITED",
+        summary: `Intake details for ${before.orderNumber} edited by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath(`/manager/orders/${data.orderId}`);
@@ -332,15 +363,21 @@ export async function updateGeneralNotes(orderId: string, generalNotes: string):
   const session = await requireSession();
   const order = await db.order.findUnique({ where: { id: orderId } });
   if (!order) return { ok: false, error: "Order not found." };
+  if (order.status === "CANCELLED") return { ok: false, error: "This order is cancelled." };
 
-  await db.order.update({ where: { id: orderId }, data: { generalNotes } });
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "GENERAL_NOTES_EDITED",
-    summary: `Order-level notes updated on ${order.orderNumber} by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { generalNotes } });
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "GENERAL_NOTES_EDITED",
+        summary: `Order-level notes updated on ${order.orderNumber} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath(`/manager/orders/${orderId}`);
@@ -355,15 +392,21 @@ export async function updatePaymentStatus(
   const session = await requireSession();
   const order = await db.order.findUnique({ where: { id: orderId } });
   if (!order) return { ok: false, error: "Order not found." };
+  if (order.status === "CANCELLED") return { ok: false, error: "This order is cancelled." };
 
-  await db.order.update({ where: { id: orderId }, data: { paymentStatus } });
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "PAYMENT_STATUS_CHANGED",
-    summary: `Payment status for ${order.orderNumber} set to ${paymentStatus} by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { paymentStatus } });
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "PAYMENT_STATUS_CHANGED",
+        summary: `Payment status for ${order.orderNumber} set to ${paymentStatus} by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath(`/manager/orders/${orderId}`);
@@ -382,15 +425,19 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
   if (!order) return { ok: false, error: "Order not found." };
   if (order.status === "CANCELLED") return { ok: true };
 
-  await db.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
-
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "ORDER_CANCELLED",
-    summary: `Order ${order.orderNumber} cancelled by ${session.name}${reason?.trim() ? ` — ${reason.trim()}` : ""}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "ORDER_CANCELLED",
+        summary: `Order ${order.orderNumber} cancelled by ${session.name}${reason?.trim() ? ` — ${reason.trim()}` : ""}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager");
@@ -418,15 +465,17 @@ export async function uncancelOrder(orderId: string): Promise<ActionResult> {
     // for the same derivation every other action already relies on.
     await tx.order.update({ where: { id: orderId }, data: { status: "IN_PROGRESS" } });
     await recomputeOrderStatus(orderId, tx);
-  });
-
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "ORDER_UNCANCELLED",
-    summary: `Order ${order.orderNumber} restored from cancelled by ${session.name}.`,
-    performedById: session.userId,
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "ORDER_UNCANCELLED",
+        summary: `Order ${order.orderNumber} restored from cancelled by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath("/manager");
@@ -442,14 +491,19 @@ export async function rotateClientToken(orderId: string): Promise<ActionResult> 
   const order = await db.order.findUnique({ where: { id: orderId } });
   if (!order) return { ok: false, error: "Order not found." };
 
-  await db.order.update({ where: { id: orderId }, data: { clientToken: generateClientToken() } });
-  await logAudit({
-    orderId,
-    entityType: "ORDER",
-    entityId: orderId,
-    action: "CLIENT_LINK_ROTATED",
-    summary: `Client tracking link for ${order.orderNumber} was reset by ${session.name}.`,
-    performedById: session.userId,
+  await db.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { clientToken: generateClientToken() } });
+    await logAudit(
+      {
+        orderId,
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "CLIENT_LINK_ROTATED",
+        summary: `Client tracking link for ${order.orderNumber} was reset by ${session.name}.`,
+        performedById: session.userId,
+      },
+      tx
+    );
   });
 
   revalidatePath(`/manager/orders/${orderId}`);

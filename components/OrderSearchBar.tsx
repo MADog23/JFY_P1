@@ -29,6 +29,9 @@ export function OrderSearchBar() {
       if (value) params.set(key, value);
       else params.delete(key);
     });
+    // A new search changes which orders match, so whatever page the list was on no
+    // longer means anything — back to page 1, same as switching a status tab does.
+    params.delete("page");
     startTransition(() => router.push(`${pathname}?${params.toString()}`));
   }
 
@@ -48,8 +51,11 @@ export function OrderSearchBar() {
       className="mb-4 flex flex-wrap items-end gap-2 rounded-2xl border border-linen bg-white p-4"
     >
       <div className="min-w-[200px] flex-1">
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">Search</label>
+        <label htmlFor="order-search-search" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">
+          Search
+        </label>
         <input
+          id="order-search-search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Client name, phone, email, or order #…"
@@ -57,8 +63,11 @@ export function OrderSearchBar() {
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">From</label>
+        <label htmlFor="order-search-from" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">
+          From
+        </label>
         <input
+          id="order-search-from"
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
@@ -66,8 +75,11 @@ export function OrderSearchBar() {
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">To</label>
+        <label htmlFor="order-search-to" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/50">
+          To
+        </label>
         <input
+          id="order-search-to"
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value)}

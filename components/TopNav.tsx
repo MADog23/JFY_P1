@@ -38,8 +38,11 @@ export function TopNav({
         </div>
         <div className="flex items-center gap-3 text-sm">
           {role === "MANAGER" && <MobileNavMenu links={managerLinks} />}
-          <span className="hidden text-charcoal/70 sm:inline">
-            {name} <span className="text-charcoal/40">· {role === "MANAGER" ? "Manager" : "Employee"}</span>
+          <span className="text-charcoal/70">
+            {name}{" "}
+            <span className="hidden text-charcoal/40 sm:inline">
+              · {role === "MANAGER" ? "Manager" : "Employee"}
+            </span>
           </span>
           <form action={logout}>
             <button className="focus-ring rounded-lg border border-linen px-3 py-1.5 text-charcoal/70 hover:bg-cream">

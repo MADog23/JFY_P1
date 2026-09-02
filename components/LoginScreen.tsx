@@ -77,10 +77,11 @@ function EmployeeLogin({ employees }: { employees: Employee[] }) {
 
   return (
     <div className="rounded-2xl border border-linen bg-white p-6 shadow-sm">
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="employee-login-name" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         Your name
       </label>
       <select
+        id="employee-login-name"
         className="focus-ring mb-5 w-full rounded-lg border border-linen bg-cream px-3 py-2 text-ink"
         value={employeeId}
         onChange={(e) => {
@@ -152,10 +153,11 @@ function ManagerLogin() {
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-linen bg-white p-6 shadow-sm">
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="manager-login-email" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         Email
       </label>
       <input
+        id="manager-login-email"
         type="email"
         required
         value={email}
@@ -163,10 +165,11 @@ function ManagerLogin() {
         className="focus-ring mb-4 w-full rounded-lg border border-linen bg-cream px-3 py-2 text-ink"
         placeholder="manager@justforyoualterations.com"
       />
-      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
+      <label htmlFor="manager-login-password" className="mb-1 block text-xs font-medium uppercase tracking-wide text-charcoal/60">
         Password
       </label>
       <input
+        id="manager-login-password"
         type="password"
         required
         value={password}

@@ -86,6 +86,11 @@ model Order {
   orderNumber String        @unique // e.g. JFY-000123
 
   // Client / pickup contact identity — intake-level, manager-editable only after creation
+  // These, plus orderNumber below, are what actions/orders.ts:listOrders searches
+  // (case-insensitive substring match). See the trigram-index migration
+  // (prisma/migrations/20260902010000_add_trigram_search_indexes) — raw SQL, not
+  // expressed here, since Prisma's DSL only gets GIN/pg_trgm support behind a preview
+  // feature this app doesn't otherwise need.
   clientName         String
   clientPhone        String
   clientEmail        String?

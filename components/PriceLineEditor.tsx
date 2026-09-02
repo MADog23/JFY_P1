@@ -31,7 +31,10 @@ export function PriceLineRow({ line }: { line: any }) {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-ink">{formatCents(line.amountCents)}</span>
-          <button onClick={() => setEditing(true)} className="text-xs text-thread hover:underline">
+          <button
+            onClick={() => setEditing(true)}
+            className="focus-ring rounded px-2 py-1 text-xs text-thread hover:underline"
+          >
             Edit
           </button>
         </div>
@@ -42,11 +45,11 @@ export function PriceLineRow({ line }: { line: any }) {
   return (
     <div className="space-y-1.5 py-2">
       {error && <p className="text-[11px] text-alert">{error}</p>}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="focus-ring flex-1 rounded-lg border border-linen bg-white px-2 py-1 text-sm"
+          className="focus-ring min-w-0 flex-1 rounded-lg border border-linen bg-white px-2 py-1 text-sm"
         />
         <div className="flex items-center gap-1">
           <span className="text-sm text-charcoal/50">$</span>

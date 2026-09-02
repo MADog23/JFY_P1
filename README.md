@@ -536,11 +536,40 @@ components/               Shared UI (forms, item cards, order profile, nav, etc.
                                lists; resets the page query param on every new search
   ItemCard.tsx                Includes the ItemAssignment control (claim / assign / release)
   ChangePasswordForm.tsx      Used by app/manager/account
-prisma/schema.prisma      Full data model
+prisma/schema.prisma      Full data model (includes Phase 2's Punch/Shift models — see below)
 prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`), including
                             a raw-SQL migration adding pg_trgm trigram search indexes
 prisma/seed.ts            Creates first manager login + default taxonomy
+phase2/PLAN.md            Phase 2 (timeclock + scheduling) evaluation trail and design notes —
+                            not code, just the planning document; see below for the actual feature
 ```
+
+### Phase 2 — Timeclock & Scheduling (flagged off by default)
+
+A second feature, built and wired in but gated behind a feature flag so it
+ships dark until it's ready to turn on. See `phase2/PLAN.md` for the full
+story (why not Homebase's own API, why not TimeTrex Community Edition, why
+native) — short version:
+
+- `Punch`/`Shift` models in `prisma/schema.prisma`, `actions/punches.ts` +
+  `actions/shifts.ts`, `lib/hours.ts` (punch → hours calculation, no pay
+  rate/overtime math — deliberately deferred), `lib/dates.ts`, and five
+  components (`ClockPad`, `DailyTotalsTable`, `PunchReviewList`,
+  `ScheduleBuilder`, `MyScheduleList`) plus their pages under
+  `app/employee/{timeclock,schedule}` and `app/manager/{timeclock,schedule}`.
+- **`PHASE2_ENABLED`** (`lib/feature-flags.ts`) gates all of it — off by
+  default. With it unset or false, `TopNav` shows no Timeclock/Schedule
+  links and the pages themselves redirect back to the normal dashboard.
+  Set `PHASE2_ENABLED=true` in Railway's environment variables and
+  redeploy/restart to turn it on; unset it and redeploy/restart to turn it
+  back off — no code change either way.
+- **Needs a migration before it can be turned on** — the schema is edited
+  but no migration has been generated/run yet. Run
+  `npx prisma migrate dev --name add_phase2_timeclock_scheduling` against a
+  scratch/local database first, review the generated SQL (purely additive —
+  two new tables, no existing table altered), then deploy as usual (`npm
+  start` already runs `prisma migrate deploy` first). Only flip
+  `PHASE2_ENABLED` on after that migration has run against production.
 
 ## Permissions at a glance
 
@@ -606,6 +635,10 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 Because `start` runs migrations automatically, future schema changes just need a new
 migration file committed (`npx prisma migrate dev --name your_change` locally against a
 dev database) — Railway will apply it on the next deploy.
+
+**Phase 2 (timeclock + scheduling)**: not live until you generate/run its migration
+(`npx prisma migrate dev --name add_phase2_timeclock_scheduling`, see "Project structure"
+above) and set `PHASE2_ENABLED=true` in Variables — leave it unset until then.
 
 ## Extending later (by design, not by accident)
 

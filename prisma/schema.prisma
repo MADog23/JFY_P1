@@ -79,6 +79,16 @@ model User {
   itemsAssignedToMe OrderItem[]  @relation("ItemAssignedTo")
   itemsAssignedByMe OrderItem[]  @relation("ItemAssignedBy")
   itemsRemovedByMe  OrderItem[]  @relation("ItemRemovedBy")
+
+  // Phase 2 (timeclock + scheduling) — gated behind PHASE2_ENABLED (see
+  // lib/feature-flags.ts) but the tables exist regardless of the flag.
+  punches         Punch[]  @relation("PunchOwner")
+  punchesCreated  Punch[]  @relation("PunchCreatedBy")
+  punchesEdited   Punch[]  @relation("PunchEditedBy")
+  punchesVoided   Punch[]  @relation("PunchVoidedBy")
+  shiftsAssigned  Shift[]  @relation("ShiftAssignee")
+  shiftsCreated   Shift[]  @relation("ShiftCreatedBy")
+  shiftsCancelled Shift[]  @relation("ShiftCancelledBy")
 }
 
 model Order {
@@ -328,4 +338,102 @@ model AlterationTypeOption {
 model OrderCounter {
   id         Int @id @default(1)
   lastNumber Int @default(0)
+}
+
+// ============================================================================
+// Phase 2 — Timeclock & Scheduling
+// ============================================================================
+// Built separately from Phase 1's order-ticket workflow above, but living in the same
+// schema/database now that it's been reviewed and wired in (see phase2/PLAN.md for the
+// full evaluation trail — why not Homebase's own API, why not TimeTrex Community
+// Edition, why native). Gated behind PHASE2_ENABLED (lib/feature-flags.ts) at the
+// application layer — these tables exist and can be written to regardless of the flag,
+// which is deliberate: the flag controls staff-facing access, not data existence, so
+// toggling it off doesn't touch anything already recorded.
+//
+// Scope, deliberately: raw punch capture, hours-worked totals, and scheduling only.
+// No pay rate, no overtime multiplier, no payroll export — see lib/hours.ts's header.
+// That's on hold until how payroll/accounting actually runs today is confirmed.
+
+enum PunchType {
+  CLOCK_IN
+  CLOCK_OUT
+  BREAK_START
+  BREAK_END
+}
+
+// A punch is a single timestamped event, not a stored "shift record" — mirrors how an
+// actual time clock works. lib/hours.ts pairs these back into work sessions for
+// display; nothing stores a precomputed "hours worked" total, so correcting a bad punch
+// automatically fixes every total derived from it instead of leaving a stale cached
+// number behind.
+model Punch {
+  id String @id @default(cuid())
+
+  // Whose time this is. Almost always also the creator (a self-punch), except for a
+  // manager's manual add for a missed punch — see createdById below.
+  userId String
+  user   User   @relation("PunchOwner", fields: [userId], references: [id])
+
+  type      PunchType
+  timestamp DateTime
+
+  note String? // optional free text ("forgot to clock out, adding from memory")
+
+  // Who actually created this row — the same person for a normal self-punch, or a
+  // manager for a manual add / backfilled missed punch. Same split as OrderItem's
+  // assignedToId vs. assignedById: userId alone can't tell "self-punched" from
+  // "manager entered this on their behalf" apart.
+  createdById String
+  createdBy   User     @relation("PunchCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  // Manager correction trail. A punch is never silently rewritten — see
+  // actions/punches.ts:correctPunch, which requires MANAGER and writes the previous
+  // timestamp/type into the audit summary (mirrors ItemNote's edit-audit pattern: the
+  // correction itself is the accountability trail, not an extra column).
+  editedAt   DateTime?
+  editedById String?
+  editedBy   User?     @relation("PunchEditedBy", fields: [editedById], references: [id])
+
+  // Soft-void for a punch that shouldn't count at all (duplicate double-tap, test
+  // punch) — same philosophy as Order.CANCELLED / OrderItem.removedAt: never deleted,
+  // excluded from hours totals and from lib/hours.ts's session pairing.
+  voidedAt   DateTime?
+  voidedById String?
+  voidedBy   User?     @relation("PunchVoidedBy", fields: [voidedById], references: [id])
+  voidReason String?
+
+  @@index([userId, timestamp])
+}
+
+model Shift {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation("ShiftAssignee", fields: [userId], references: [id])
+
+  startAt DateTime
+  endAt   DateTime
+  role    String? // optional label, e.g. "Front counter", "Alterations bench"
+  note    String?
+
+  // Draft until a manager explicitly publishes it — see actions/shifts.ts:
+  // publishShifts. Employees only ever see published, non-cancelled shifts (their "my
+  // schedule" view); a draft is manager-only, same idea as Order's pre-seal editability.
+  publishedAt DateTime?
+
+  createdById String
+  createdBy   User     @relation("ShiftCreatedBy", fields: [createdById], references: [id])
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  // Soft-cancel, same pattern as Order.CANCELLED — a shift that shouldn't have existed
+  // (wrong person scheduled, duplicate) stays in history rather than being deleted.
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelledBy   User?     @relation("ShiftCancelledBy", fields: [cancelledById], references: [id])
+
+  @@index([userId, startAt])
+  @@index([startAt])
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { logout } from "@/actions/auth";
 import { MobileNavMenu } from "./MobileNavMenu";
+import { isPhase2Enabled } from "@/lib/feature-flags";
 
 export function TopNav({
   name,
@@ -10,7 +11,16 @@ export function TopNav({
   role: "EMPLOYEE" | "MANAGER";
 }) {
   const base = role === "MANAGER" ? "/manager" : "/employee";
+  // Phase 2 (timeclock + scheduling) — off by default; see lib/feature-flags.ts for
+  // how to turn this on (and back off) without a code change.
+  const phase2Links = isPhase2Enabled()
+    ? [
+        { href: `${base}/timeclock`, label: "Timeclock" },
+        { href: `${base}/schedule`, label: "Schedule" },
+      ]
+    : [];
   const managerLinks = [
+    ...phase2Links,
     { href: "/manager/employees", label: "Staff" },
     { href: "/manager/taxonomy", label: "Garment options" },
     { href: "/manager/analytics", label: "Analytics" },
@@ -28,6 +38,12 @@ export function TopNav({
             <Link href={base} className="hover:text-ink">
               Orders
             </Link>
+            {role === "EMPLOYEE" &&
+              phase2Links.map((link) => (
+                <Link key={link.href} href={link.href} className="hover:text-ink">
+                  {link.label}
+                </Link>
+              ))}
             {role === "MANAGER" &&
               managerLinks.map((link) => (
                 <Link key={link.href} href={link.href} className="hover:text-ink">

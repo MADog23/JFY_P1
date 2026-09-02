@@ -14,6 +14,7 @@ export function TopNav({
     { href: "/manager/employees", label: "Staff" },
     { href: "/manager/taxonomy", label: "Garment options" },
     { href: "/manager/analytics", label: "Analytics" },
+    { href: "/manager/account", label: "My account" },
   ];
 
   return (

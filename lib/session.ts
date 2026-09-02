@@ -1,19 +1,10 @@
 import "server-only";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { getSecret, JWT_ALGORITHMS, SESSION_COOKIE_NAME } from "./jwt-config";
 
-const COOKIE_NAME = "jfy_session";
+const COOKIE_NAME = SESSION_COOKIE_NAME;
 const SESSION_DURATION_SECONDS = 60 * 60 * 12; // 12 hour shift-length session
-
-function getSecret() {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 16) {
-    throw new Error(
-      "SESSION_SECRET is missing or too short. Set a long random value in your environment."
-    );
-  }
-  return new TextEncoder().encode(secret);
-}
 
 export type SessionPayload = {
   userId: string;
@@ -41,7 +32,7 @@ export async function readSession(): Promise<SessionPayload | null> {
   const token = cookies().get(COOKIE_NAME)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, getSecret());
+    const { payload } = await jwtVerify(token, getSecret(), { algorithms: JWT_ALGORITHMS });
     return payload as unknown as SessionPayload;
   } catch {
     return null;
@@ -52,4 +43,4 @@ export function destroySession() {
   cookies().delete(COOKIE_NAME);
 }
 
-export const SESSION_COOKIE_NAME = COOKIE_NAME;
+export { SESSION_COOKIE_NAME };

@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireManager, getOptionalSession } from "@/lib/auth";
+import { requireManager, requireSession } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import type { ActionResult } from "./auth";
 
 /** Any signed-in user needs these to fill out the intake form. */
 export async function listTaxonomy() {
-  await getOptionalSession();
+  await requireSession();
   const [garmentTypes, alterationTypes] = await Promise.all([
     db.garmentTypeOption.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     db.alterationTypeOption.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),

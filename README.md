@@ -247,6 +247,84 @@ this just gives staff a second way to get a client into the same page.
   tell a client "go to [site]/track and enter your order number and phone number" without
   needing to send anything.
 
+## Security hardening
+
+A pass through the whole app looking for weak points, once Phase 1 itself had settled.
+None of these change how the app behaves day-to-day — they close gaps a normal workflow
+would never hit.
+
+- **Login throttling**: `employeeLogin`/`managerLogin` (`actions/auth.ts`) now run
+  through `lib/rate-limit.ts` twice per attempt, on two different keys. A per-IP cap (20
+  attempts / 10 min) catches someone hammering many accounts from one place; a stricter
+  per-account cap (6 attempts / 10 min, keyed by employee id or manager email) catches a
+  targeted brute force of ONE account from many IPs or devices — which matters
+  especially for employee PINs, since the login screen's name picker has to publicly
+  list every employee's id for the dropdown, and PINs can be as short as 4 digits. A
+  failed attempt against a real account also writes an `EMPLOYEE`/`LOGIN_FAILED` row to
+  the audit log (with the source IP in the summary), so repeated failures against one
+  account are now visible in the existing audit trail, not invisible. Both throttles
+  reuse the same best-effort, in-memory `isRateLimited()` as the `/track` lookup — see
+  that function's own comment for what "best-effort" means here.
+- **Client IP detection** (`lib/rate-limit.ts:getClientIp()`): prefers Cloudflare's
+  `cf-connecting-ip` header (this app sits behind Cloudflare — see the custom domain
+  section above — and Cloudflare overwrites that header at its edge, so a client can't
+  forge it), falling back to the *last* hop of `x-forwarded-for` (the one entry a client
+  can't forge, since a client can only prepend fake entries to that header, not remove
+  the one Railway's own proxy appends) rather than the first, spoofable one. Shared by
+  the login throttles and the `/track` lookup throttle.
+- **Sessions are revoked on deactivation, not just blocked at next login**
+  (`lib/auth.ts`): a session cookie used to be validated purely by JWT signature and
+  expiry, so deactivating an employee or manager (Staff → Deactivate) only stopped
+  *future* logins — anyone already signed in kept working on that device for up to the
+  rest of their 12-hour session. `requireSession()`/`requireManager()`/
+  `getOptionalSession()` now re-check the account's `active` flag (and role) against the
+  database on every call, and sign the cookie out immediately if it no longer matches.
+  This costs one indexed lookup per guarded page load or action — worth it at this app's
+  scale for "I just deactivated someone and they still have the tablet" to actually mean
+  what it sounds like.
+- **Manager self-service password change**: a new "My account" page
+  (`/manager/account`, linked from the top nav) lets a manager change their own
+  password, given their current one. There was previously no way to do this from inside
+  the app at all — not for the account `prisma/seed.ts` creates on first run, and not
+  for a "temporary password" set when creating another manager from Staff — only direct
+  database access could rotate one. **If you're still signing in with the seeded
+  default** (`manager@justforyoualterations.com` / whatever `SEED_MANAGER_PASSWORD` was
+  or defaulted to — printed once to the console the first time `db:seed` ran), change it
+  from this page now that it exists.
+- **`listTaxonomy()` guard fix** (`actions/taxonomy.ts`): this was calling
+  `getOptionalSession()` but never checking what it returned, so despite its own
+  comment ("Any signed-in user needs these") it was actually callable by anyone,
+  signed in or not — server actions are directly-invokable endpoints, not just buttons
+  in the UI. Low severity (it only exposes your garment/alteration option labels, not
+  client data) but a real bug; now uses `requireSession()` like every other
+  any-signed-in-user action.
+- **Security headers** (`next.config.js`): every response now sets
+  `X-Frame-Options`/`frame-ancestors` (clickjacking), `X-Content-Type-Options: nosniff`
+  (MIME-sniffing), `Referrer-Policy`, a `Permissions-Policy` disabling camera/mic/
+  geolocation (unused by this app), `Strict-Transport-Security`, and a
+  Content-Security-Policy scoped to this app's own origin. See the comment above
+  `securityHeaders` in `next.config.js` for why `script-src`/`style-src` still allow
+  `'unsafe-inline'` (Next's own hydration bootstrap needs it without a nonce-based CSP,
+  which is a bigger follow-up change) and why that's an acceptable tradeoff here — this
+  app has no `dangerouslySetInnerHTML` and never renders user-supplied HTML anywhere.
+- **One JWT secret/algorithm source, not two**: `middleware.ts` used to re-derive the
+  session secret itself with a silent `process.env.SESSION_SECRET || ""` fallback,
+  separate from `lib/session.ts`'s fail-loud version — not currently exploitable (a
+  mismatched secret just fails closed, redirecting to login) but duplicated logic that
+  could drift. Both now import the same `getSecret()`/`JWT_ALGORITHMS` from the new
+  `lib/jwt-config.ts` (kept dependency-free of `next/headers` on purpose, so importing
+  it into `middleware.ts`'s Edge bundle doesn't drag in anything Node-only), and both
+  `jwtVerify()` calls now pin `algorithms: ["HS256"]` explicitly rather than relying on
+  the library's own inference.
+- **Verified, not just assumed**: this app's pinned Next.js version (`^14.2.35`) is past
+  `14.2.25`, the version that patched
+  [CVE-2025-29927](https://github.com/advisories/GHSA-f82v-jwr5-mffw), a critical
+  middleware-authorization-bypass bug — worth knowing given `middleware.ts` is this
+  app's first gate for `/manager` and `/employee`. (It's a first gate only, not the only
+  one — see the point above: every one of those pages and every server action
+  independently re-runs `requireSession()`/`requireManager()`, so even a middleware-only
+  bypass wouldn't by itself have exposed page data. Still good to be patched.)
+
 ## Project structure
 
 ```
@@ -254,20 +332,26 @@ app/                      Next.js App Router pages
   login/                   Employee PIN + manager credential login
   employee/                Employee dashboard, new-intake form, order working profile
   manager/                 Manager dashboard, order profile, staff, taxonomy, analytics
+  manager/account/         Manager's own "change my password" page
   track/[token]/           Public read-only client tracking page
   track/page.tsx           Public order-number + phone lookup page (routes into the above)
 actions/                  Server actions (all mutations + audit logging live here)
   pricing.ts               MANAGER ONLY: add/edit/delete a PriceLine after intake
   track.ts                 Public (not gated): order-number + phone lookup action
+  auth.ts                   Login (rate-limited), logout, changeMyPassword (self-service)
 lib/                      DB client, auth/session, audit log, order numbering,
                            order-status lifecycle, client-view redaction
+  auth.ts                    requireSession/requireManager — re-checks `active` per request
+  jwt-config.ts               Shared JWT secret/algorithm, used by lib/session.ts AND middleware.ts
   pricing.ts                recomputeOrderTotal — call inside any PriceLine mutation's tx
   money.ts                   formatCents / parseDollarsToCents — the only place cents<->dollars happens
-  rate-limit.ts              Best-effort in-memory throttle, used by actions/track.ts
+  rate-limit.ts              Best-effort in-memory throttle + getClientIp() — used by
+                              actions/track.ts and actions/auth.ts's login throttling
 components/               Shared UI (forms, item cards, order profile, nav, etc.)
   PriceLineEditor.tsx        Shared manager-only price-line row/add-form (ItemCard + OrderProfile)
   OrderSearchBar.tsx         Client + date-range search box for the employee/manager order lists
   ItemCard.tsx                Includes the ItemAssignment control (claim / assign / release)
+  ChangePasswordForm.tsx      Used by app/manager/account
 prisma/schema.prisma      Full data model
 prisma/migrations/        Hand-authored migrations (ready for `migrate deploy`)
 prisma/seed.ts            Creates first manager login + default taxonomy
@@ -285,6 +369,7 @@ prisma/seed.ts            Creates first manager login + default taxonomy
 | Authorize item pickup (partial or full order)         |   Yes    |   Yes   |
 | Undo an accidental pickup                             |    No    |   Yes   |
 | Manage employee PINs / names / manager accounts      |    No    |   Yes   |
+| Change own password (`/manager/account`)              |    N/A   |   Yes (self only) |
 | Manage garment/alteration options                    |    No    |   Yes   |
 | View analytics                                       |    No    |   Yes   |
 | Enter itemized pricing **at intake creation only**    |   Yes    |   Yes   |

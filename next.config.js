@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
-
+ 
 // Baseline security headers, applied to every response. This app has no external
 // scripts/fonts/images (see app/layout.tsx — everything is served from itself), so a
 // fairly strict Content-Security-Policy is safe here without an allowlist of third-party
@@ -22,7 +22,7 @@
 // set to "production" automatically by both `next build` and `next start`, and to
 // "development" by `next dev`, so this never has to be set by hand.
 const isDev = process.env.NODE_ENV !== "production";
-
+ 
 const securityHeaders = [
   // Clickjacking: refuse to be framed by any other site (frame-ancestors is the modern,
   // CSP-based replacement for X-Frame-Options; both are set since some older clients
@@ -63,7 +63,7 @@ const securityHeaders = [
     ].join("; "),
   },
 ];
-
+ 
 const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
@@ -77,5 +77,6 @@ const nextConfig = {
     ];
   },
 };
-
+ 
 module.exports = nextConfig;
+ 

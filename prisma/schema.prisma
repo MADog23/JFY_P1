@@ -312,6 +312,11 @@ model AuditLog {
   entityId      String
   action        String // e.g. "INTAKE_CREATED", "STATUS_CHANGE", "PICKUP_AUTHORIZED"
   summary       String
+  // Set only for login-related entries (see actions/auth.ts) — kept as its own field
+  // rather than folded into `summary` so the manager audit report can hide/reveal it
+  // as one clean column instead of redacting free text. Nothing else in the app writes
+  // an IP anywhere, so this stays null for every other kind of AuditLog row.
+  ipAddress     String?
   performedById String
   performedBy   User     @relation(fields: [performedById], references: [id])
   createdAt     DateTime @default(now())

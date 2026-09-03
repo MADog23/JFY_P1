@@ -10,6 +10,10 @@ type AuditInput = {
   action: string;
   summary: string;
   performedById: string;
+  // Set only by the login/auth call sites (actions/auth.ts) — kept as its own column
+  // rather than folded into `summary` so the manager audit report (actions/audit-report.ts)
+  // can hide/reveal it as one clean field instead of trying to redact free text.
+  ipAddress?: string | null;
 };
 
 /**
@@ -33,6 +37,7 @@ export async function logAudit(input: AuditInput, client: Prisma.TransactionClie
       action: input.action,
       summary: input.summary,
       performedById: input.performedById,
+      ipAddress: input.ipAddress ?? null,
     },
   });
 }

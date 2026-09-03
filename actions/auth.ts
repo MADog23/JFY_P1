@@ -58,8 +58,12 @@ export async function employeeLogin(employeeId: string, pin: string): Promise<Ac
       entityType: "EMPLOYEE",
       entityId: user.id,
       action: "LOGIN_FAILED",
-      summary: `Failed PIN attempt for "${user.name}" from ${ip}.`,
+      // IP no longer lives in the summary text (see AuditLog.ipAddress) — the audit
+      // report hides/reveals it as its own field behind step-up re-auth instead of it
+      // sitting here as unredactable plain text.
+      summary: `Failed PIN attempt for "${user.name}".`,
       performedById: user.id,
+      ipAddress: ip,
     });
     return { ok: false, error: "Incorrect PIN." };
   }
@@ -71,8 +75,9 @@ export async function employeeLogin(employeeId: string, pin: string): Promise<Ac
     entityType: "EMPLOYEE",
     entityId: user.id,
     action: "LOGIN_SUCCESS",
-    summary: `"${user.name}" logged in from ${ip}.`,
+    summary: `"${user.name}" logged in.`,
     performedById: user.id,
+    ipAddress: ip,
   });
 
   await createSession({ userId: user.id, name: user.name, role: "EMPLOYEE" });
@@ -102,8 +107,9 @@ export async function managerLogin(email: string, password: string): Promise<Act
       entityType: "EMPLOYEE",
       entityId: user.id,
       action: "LOGIN_FAILED",
-      summary: `Failed password attempt for "${user.name}" from ${ip}.`,
+      summary: `Failed password attempt for "${user.name}".`,
       performedById: user.id,
+      ipAddress: ip,
     });
     return { ok: false, error: "Incorrect email or password." };
   }
@@ -114,8 +120,9 @@ export async function managerLogin(email: string, password: string): Promise<Act
     entityType: "EMPLOYEE",
     entityId: user.id,
     action: "LOGIN_SUCCESS",
-    summary: `"${user.name}" logged in from ${ip}.`,
+    summary: `"${user.name}" logged in.`,
     performedById: user.id,
+    ipAddress: ip,
   });
 
   await createSession({ userId: user.id, name: user.name, role: "MANAGER" });

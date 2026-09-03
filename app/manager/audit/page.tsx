@@ -3,6 +3,7 @@ import { requireManager } from "@/lib/auth";
 import { listAuditReport, listStaffForAuditFilter, type AuditCategory } from "@/actions/audit-report";
 import { TopNav } from "@/components/TopNav";
 import { AuditReportFilters } from "@/components/AuditReportFilters";
+import { RevealIpAddressesControl } from "@/components/RevealIpAddressesControl";
 import { entityTypeLabel } from "@/lib/audit-categories";
 import { formatShopDateTime } from "@/lib/dates";
 
@@ -16,10 +17,20 @@ export default async function AuditReportPage({
   const performedById = searchParams.performedById || undefined;
   const page = Math.max(parseInt(searchParams.page ?? "1", 10) || 1, 1);
 
-  const [{ rows, total, pageSize, hasMore, from, to }, staff] = await Promise.all([
+  const [{ rows, total, pageSize, hasMore, from, to, ipRevealed, ipRevealExpiresAt }, staff] = await Promise.all([
     listAuditReport({ from: searchParams.from, to: searchParams.to, category, performedById, page }),
     listStaffForAuditFilter(),
   ]);
+
+  // IP addresses are only ever relevant (and only ever shown) while filtered to the
+  // Security category — that's the one place logins/failed attempts live, and it keeps
+  // the reveal control from showing up on every other view of this report.
+  const showIpColumn = category === "SECURITY";
+  // Only LOGIN_SUCCESS/LOGIN_FAILED rows ever have an IP captured at all (see
+  // actions/auth.ts) — other Security rows like PASSWORD_CHANGED never did, so those
+  // should read as "—" even while unrevealed rather than "Hidden", which would wrongly
+  // imply there's something there to unlock.
+  const IP_CAPTURING_ACTIONS = new Set(["LOGIN_SUCCESS", "LOGIN_FAILED"]);
 
   // Rebuilds the *resolved* from/to (not raw searchParams) so paging never silently
   // drops back to the default week when the manager hasn't touched the date inputs.
@@ -44,6 +55,8 @@ export default async function AuditReportPage({
 
         <AuditReportFilters staff={staff} defaultFrom={from} defaultTo={to} />
 
+        {showIpColumn && <RevealIpAddressesControl revealed={ipRevealed} expiresAt={ipRevealExpiresAt} />}
+
         <div className="overflow-x-auto rounded-2xl border border-linen bg-white">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -53,6 +66,7 @@ export default async function AuditReportPage({
                 <th className="px-4 py-3 font-medium">Action</th>
                 <th className="px-4 py-3 font-medium">Summary</th>
                 <th className="px-4 py-3 font-medium">Performed by</th>
+                {showIpColumn && <th className="px-4 py-3 font-medium">IP address</th>}
               </tr>
             </thead>
             <tbody>
@@ -75,11 +89,16 @@ export default async function AuditReportPage({
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-charcoal/70">{row.performedBy.name}</td>
+                  {showIpColumn && (
+                    <td className="whitespace-nowrap px-4 py-3 text-charcoal/70">
+                      {row.ipAddress ?? (!ipRevealed && IP_CAPTURING_ACTIONS.has(row.action) ? "Hidden" : "—")}
+                    </td>
+                  )}
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-charcoal/50">
+                  <td colSpan={showIpColumn ? 6 : 5} className="px-4 py-8 text-center text-charcoal/50">
                     No activity in this range matches these filters.
                   </td>
                 </tr>

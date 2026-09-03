@@ -1,9 +1,10 @@
 /**
  * HISTORICAL ANALYTICS DEMO DATA
  *
- * Generates a spread of backdated orders (Apr–Aug 2026, ~5 months) so the new
- * "Historical performance" analytics section (see README § "Historical performance
- * analytics") has real trend data to show, instead of empty charts and null stats.
+ * Generates a spread of backdated orders (Apr–Aug 2026, ~5 months, 40/month = ~200
+ * orders total) so the "Historical performance" analytics section (see README §
+ * "Historical performance analytics") has real trend data to show, instead of empty
+ * charts and null stats.
  *
  * Unlike prisma/seed-pricing-demo.ts, this script does NOT create any staff accounts
  * — it looks up your real, already-existing employees by name and attributes all the
@@ -11,18 +12,28 @@
  * assignments, payment status changes) to them, so the "Team activity" table reflects
  * actual staff names instead of a throwaway "Demo Employee" login. It expects to find:
  *
- *   Employees (PIN login): Nina DeZemplen, Autumn, Janice Tucker, Kamila, Emilse, Valentina
- *   Managers  (email login): Emilse, Valentina  (their co-owner accounts — used for the
- *                            manager-only actions: assigning/reassigning items and
- *                            reopening a completed item)
+ *   Employees (PIN login): Nina DeZemplen, Autumn Vrazel, Janice Tucker, Kamila Chorieva,
+ *                          Emilse Salinas, Valentina Forero
+ *   Managers  (email login): Emilse Salinas, Valentina Forero  (their co-owner accounts —
+ *                            used for the manager-only actions: assigning/reassigning
+ *                            items and reopening a completed item)
  *
  * If any of those names don't match exactly what's in Staff accounts, the script stops
  * and tells you which one before writing anything.
  *
  * Every order this creates has a clientName prefixed "[DEMO-HIST] " — a different tag
  * from the "[DEMO] " prefix prisma/seed-pricing-demo.ts uses, so the two demo sets
- * don't collide and can each be cleared independently. Idempotent per client name: a
- * partial/interrupted run can just be re-run and it'll skip whatever it already made.
+ * don't collide and can each be cleared independently.
+ *
+ * Client names are drawn at random (deterministically — same seed every run) from
+ * FIRST_NAMES x LAST_NAMES and checked against both what's already in the database
+ * and what's already been picked earlier in the same run, so a run never collides
+ * with — or silently skips in place of — an order that already exists. That does mean
+ * re-running this on top of a *complete* prior run adds another ~200 orders rather
+ * than being a no-op — this script is meant to be run once against a freshly-purged
+ * database (see prisma/purge-orders-schedule-timeclock.ts), not repeatedly on top of
+ * itself. If a run gets interrupted partway, the safest fix is to purge and start
+ * over rather than trying to resume it.
  *
  * Run it with:   npx tsx prisma/seed-historical-demo.ts
  * Clear it with: npx tsx prisma/clear-historical-demo.ts
@@ -31,10 +42,7 @@
  *
  * Every generated action is logged to the audit trail same as the real app, with
  * "(demo data)" appended to the summary so it's identifiable in each order's activity
- * log. Dates, outcomes, and staff assignment are picked by a seeded random generator
- * (same seed every run) so a partial re-run reproduces the same plan rather than
- * drifting — but since orders are skipped once created, re-running after a full
- * successful run is a no-op.
+ * log.
  */
 
 import { PrismaClient, Prisma } from "@prisma/client";
@@ -44,8 +52,8 @@ const prisma = new PrismaClient();
 
 const TAG = "[DEMO-HIST]";
 
-const EMPLOYEE_NAMES = ["Nina DeZemplen", "Autumn", "Janice Tucker", "Kamila", "Emilse", "Valentina"];
-const MANAGER_NAMES = ["Emilse", "Valentina"];
+const EMPLOYEE_NAMES = ["Nina DeZemplen", "Autumn Vrazel", "Janice Tucker", "Kamila Chorieva", "Emilse Salinas", "Valentina Forero"];
+const MANAGER_NAMES = ["Emilse Salinas", "Valentina Forero"];
 
 const MONTHS: { year: number; month1: number }[] = [
   { year: 2026, month1: 4 }, // April
@@ -54,7 +62,7 @@ const MONTHS: { year: number; month1: number }[] = [
   { year: 2026, month1: 7 }, // July
   { year: 2026, month1: 8 }, // August
 ];
-const ORDERS_PER_MONTH = 6;
+const ORDERS_PER_MONTH = 40;
 
 const ITEM_TEMPLATES: { garmentType: string; alterations: string[] }[] = [
   { garmentType: "Wedding Gown", alterations: ["Hem", "Bustle", "Take In Bodice"] },
@@ -96,11 +104,39 @@ const FIRST_NAMES = [
   "Rachel", "Sophia", "Marcus", "Priya", "Angela", "Daniel", "Emily", "John", "Olivia", "Ethan",
   "Grace", "Lily", "Noah", "Ava", "Mia", "Liam", "Isabella", "James", "Chloe", "Benjamin",
   "Hannah", "Lucas", "Zoe", "Mason", "Ella", "Logan", "Aria", "Elijah", "Layla", "Henry",
+  "Sarah", "Michael", "Jessica", "David", "Amanda", "Christopher", "Ashley", "Matthew", "Samantha", "Andrew",
+  "Victoria", "Joshua", "Madison", "Ryan", "Abigail", "Nathan", "Natalie", "Tyler", "Brianna", "Jacob",
+  "Kayla", "Justin", "Alexis",
 ];
 const LAST_NAMES = [
   "Kim", "Nguyen", "Webb", "Shah", "Torres", "Brooks", "Carter", "Whitfield", "Bennett", "Foster",
   "Hayes", "Reed", "Coleman", "Price", "Sanders", "Bishop", "Wallace", "Fletcher", "Dunn", "Marsh",
+  "Ramirez", "Patel", "Chen", "Diaz", "Murphy", "Rivera", "Cooper", "Richardson", "Cox", "Howard",
+  "Ward", "Peterson", "Gray", "Watson", "Kelly", "Simmons", "Hicks", "Warren", "Barnes", "Ross",
 ];
+
+// --- unique client-name picker ------------------------------------------------
+// With ORDERS_PER_MONTH this high, picking first/last name by `index % length` (the
+// original approach) cycles back to an already-used combination well before the run
+// finishes — every such repeat would silently collide with the idempotency check
+// below and get skipped, so the run would quietly fall short of the requested count.
+// This instead draws a random (but still seeded/deterministic) combination and
+// retries on collision, checked against both what's already in the database (an old
+// partial run) and what's already been picked earlier in *this* run.
+function pickUniqueClientName(usedNames: Set<string>): { firstName: string; lastName: string; clientName: string } {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const firstName = pick(FIRST_NAMES);
+    const lastName = pick(LAST_NAMES);
+    const clientName = `${TAG} ${firstName} ${lastName}`;
+    if (!usedNames.has(clientName)) {
+      usedNames.add(clientName);
+      return { firstName, lastName, clientName };
+    }
+  }
+  throw new Error(
+    "Ran out of unique demo client names to try (50 attempts). Add more entries to FIRST_NAMES/LAST_NAMES in this script."
+  );
+}
 
 // --- seeded RNG (deterministic) ----------------------------------------------
 function mulberry32(seed: number) {
@@ -194,16 +230,15 @@ type StaffRef = { id: string; name: string };
 
 type Outcome = "in_progress" | "sealed_ready" | "picked_up_ontime" | "picked_up_late" | "reopened_then_sealed";
 
-async function seedOrder(index: number, year: number, month1: number, employees: StaffRef[], managers: StaffRef[]) {
-  const firstName = FIRST_NAMES[index % FIRST_NAMES.length];
-  const lastName = LAST_NAMES[index % LAST_NAMES.length];
-  const clientName = `${TAG} ${firstName} ${lastName}`;
-
-  const existing = await prisma.order.findFirst({ where: { clientName } });
-  if (existing) {
-    console.log(`Skipping "${clientName}" — already seeded (order ${existing.orderNumber}).`);
-    return;
-  }
+async function seedOrder(
+  index: number,
+  year: number,
+  month1: number,
+  employees: StaffRef[],
+  managers: StaffRef[],
+  usedNames: Set<string>
+) {
+  const { firstName, lastName, clientName } = pickUniqueClientName(usedNames);
 
   const createdAt = randomDateInMonth(year, month1);
   const isRush = chance(0.12);
@@ -542,10 +577,19 @@ async function main() {
 
   console.log(`Found ${employees.length} employee account(s) and ${managers.length} manager account(s). Seeding...\n`);
 
+  // Seed usedNames with anything already in the database under this tag (e.g. left
+  // over from an earlier partial run) so a fresh run never collides with — or
+  // silently re-skips — orders that already exist.
+  const existingDemoOrders = await prisma.order.findMany({
+    where: { clientName: { startsWith: TAG } },
+    select: { clientName: true },
+  });
+  const usedNames = new Set(existingDemoOrders.map((o) => o.clientName));
+
   let index = 0;
   for (const { year, month1 } of MONTHS) {
     for (let i = 0; i < ORDERS_PER_MONTH; i++) {
-      await seedOrder(index, year, month1, employees, managers);
+      await seedOrder(index, year, month1, employees, managers, usedNames);
       index++;
     }
   }

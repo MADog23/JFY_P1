@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { logout } from "@/actions/auth";
 import { MobileNavMenu } from "./MobileNavMenu";
+import { ManageMenu } from "./ManageMenu";
 import { isPhase2Enabled } from "@/lib/feature-flags";
 
 export function TopNav({
@@ -19,38 +20,40 @@ export function TopNav({
         { href: `${base}/schedule`, label: "Schedule" },
       ]
     : [];
-  const managerLinks = [
-    ...phase2Links,
+  // Manager-only admin pages — grouped under a "Manage" dropdown on desktop (see
+  // ManageMenu) instead of each sitting as its own top-level link, so the bar doesn't
+  // keep growing. Still flattened into the mobile menu below — nothing is hidden on a
+  // phone, just organized differently on wide screens.
+  const manageLinks = [
     { href: "/manager/employees", label: "Staff" },
     { href: "/manager/taxonomy", label: "Garment options" },
     { href: "/manager/analytics", label: "Analytics" },
     { href: "/manager/account", label: "My account" },
   ];
+  const managerLinks = [...phase2Links, ...manageLinks];
 
   return (
     <header className="border-b border-linen bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-3 sm:gap-6">
           <MobileNavMenu links={role === "MANAGER" ? managerLinks : phase2Links} />
-          <Link href={base} className="font-display text-lg text-ink">
-            Just For You <span className="text-thread">· Alterations</span>
+          {/* The logo has always linked home — the house icon just makes that obvious
+              at a glance instead of relying on "click the logo" being a known
+              convention. This is the one and only "home" link now; the old standalone
+              "Orders" text link went away since it pointed at the exact same place. */}
+          <Link href={base} className="flex items-center gap-2 font-display text-lg text-ink" aria-label="Go to Orders (home)">
+            <span aria-hidden="true">🏠</span>
+            <span>
+              Just For You <span className="text-thread">· Alterations</span>
+            </span>
           </Link>
-          <nav className="hidden gap-4 text-sm text-charcoal/70 sm:flex">
-            <Link href={base} className="hover:text-ink">
-              Orders
-            </Link>
-            {role === "EMPLOYEE" &&
-              phase2Links.map((link) => (
-                <Link key={link.href} href={link.href} className="hover:text-ink">
-                  {link.label}
-                </Link>
-              ))}
-            {role === "MANAGER" &&
-              managerLinks.map((link) => (
-                <Link key={link.href} href={link.href} className="hover:text-ink">
-                  {link.label}
-                </Link>
-              ))}
+          <nav className="hidden items-center gap-4 text-sm text-charcoal/70 sm:flex">
+            {phase2Links.map((link) => (
+              <Link key={link.href} href={link.href} className="hover:text-ink">
+                {link.label}
+              </Link>
+            ))}
+            {role === "MANAGER" && <ManageMenu links={manageLinks} />}
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">

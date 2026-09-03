@@ -20,17 +20,19 @@ export function TopNav({
         { href: `${base}/schedule`, label: "Schedule" },
       ]
     : [];
-  // Manager-only admin pages — grouped under a "Manage" dropdown on desktop (see
-  // ManageMenu) instead of each sitting as its own top-level link, so the bar doesn't
-  // keep growing. Still flattened into the mobile menu below — nothing is hidden on a
-  // phone, just organized differently on wide screens.
+  // Analytics stays a top-level link next to Timeclock/Schedule — checked often enough
+  // that it earns its own spot in the bar, unlike the admin pages below.
+  const analyticsLink = { href: "/manager/analytics", label: "Analytics" };
+  // The rest of the manager-only admin pages — grouped under a "Manage" dropdown on
+  // desktop (see ManageMenu) instead of each sitting as its own top-level link, so the
+  // bar doesn't keep growing. Still flattened into the mobile menu below — nothing is
+  // hidden on a phone, just organized differently on wide screens.
   const manageLinks = [
     { href: "/manager/employees", label: "Staff" },
     { href: "/manager/taxonomy", label: "Garment options" },
-    { href: "/manager/analytics", label: "Analytics" },
     { href: "/manager/account", label: "My account" },
   ];
-  const managerLinks = [...phase2Links, ...manageLinks];
+  const managerLinks = [...phase2Links, analyticsLink, ...manageLinks];
 
   return (
     <header className="border-b border-linen bg-white">
@@ -53,6 +55,11 @@ export function TopNav({
                 {link.label}
               </Link>
             ))}
+            {role === "MANAGER" && (
+              <Link href={analyticsLink.href} className="hover:text-ink">
+                {analyticsLink.label}
+              </Link>
+            )}
             {role === "MANAGER" && <ManageMenu links={manageLinks} />}
           </nav>
         </div>

@@ -13,6 +13,7 @@
  */
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { clockIn, clockOut, startBreak, endBreak, startLunch, endLunch } from "@/actions/punches";
 import type { CurrentPunchState } from "@/lib/hours";
 import { formatShopDateTime } from "@/lib/dates";
@@ -39,6 +40,7 @@ const STATE_COLOR: Record<CurrentPunchState, string> = {
 };
 
 export function ClockPad({ initialState }: { initialState: CurrentPunchState }) {
+  const router = useRouter();
   const [state, setState] = useState(initialState);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,10 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
       if (r.ok) {
         setState(nextState);
         setLastAction(confirmMessage);
+        // The button state above updates immediately regardless, but this page also shows
+        // a server-rendered "this week" totals list alongside the pad — without this it
+        // would stay stale until a manual reload, same bug as the schedule/timeclock pages.
+        router.refresh();
       } else {
         setError(r.error || "Something went wrong. Try again.");
       }

@@ -9,6 +9,7 @@
  */
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { correctPunch, voidPunch, addManualPunch } from "@/actions/punches";
 import type { PunchType } from "@/lib/hours";
 import { toDateTimeInputValue, formatShopDateTime } from "@/lib/dates";
@@ -31,6 +32,7 @@ type RawPunch = {
 const PUNCH_TYPES: PunchType[] = ["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END", "LUNCH_START", "LUNCH_END"];
 
 function PunchRow({ punch }: { punch: RawPunch }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [timestamp, setTimestamp] = useState(toDateTimeInputValue(punch.timestamp));
   const [type, setType] = useState<PunchType>(punch.type);
@@ -83,8 +85,10 @@ function PunchRow({ punch }: { punch: RawPunch }) {
                   // Pass the raw datetime-local string through — the server interprets it as
                   // shop-local time (see actions/punches.ts), not this browser's own timezone.
                   const r = await correctPunch(punch.id, timestamp, type);
-                  if (r.ok) setEditing(false);
-                  else setError(r.error || "Could not save.");
+                  if (r.ok) {
+                    setEditing(false);
+                    router.refresh();
+                  } else setError(r.error || "Could not save.");
                 })
               }
               className="focus-ring rounded bg-ink px-3 py-1 text-xs text-cream"
@@ -128,7 +132,8 @@ function PunchRow({ punch }: { punch: RawPunch }) {
               if (reason === null) return;
               if (!reason.trim()) return alert("A reason is required.");
               startTransition(async () => {
-                await voidPunch(punch.id, reason);
+                const r = await voidPunch(punch.id, reason);
+                if (r.ok) router.refresh();
               });
             }}
             className="focus-ring rounded px-2 py-1 text-xs text-alert hover:underline"
@@ -142,6 +147,7 @@ function PunchRow({ punch }: { punch: RawPunch }) {
 }
 
 function AddMissedPunchForm({ userId }: { userId: string }) {
+  const router = useRouter();
   const [type, setType] = useState<PunchType>("CLOCK_IN");
   const [timestamp, setTimestamp] = useState("");
   const [note, setNote] = useState("");
@@ -183,6 +189,7 @@ function AddMissedPunchForm({ userId }: { userId: string }) {
                 setAdded(true);
                 setTimestamp("");
                 setNote("");
+                router.refresh();
               } else setError(r.error || "Could not add punch.");
             })
           }

@@ -46,7 +46,7 @@ function ShiftDetails({ shift }: { shift: ShiftRow }) {
 }
 
 export function MyScheduleList({ shifts, from, to }: { shifts: ShiftRow[]; from: string; to: string }) {
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar">("calendar");
 
   if (shifts.length === 0) {
     return <p className="rounded-xl border border-linen bg-white p-4 text-sm text-charcoal/60">No published shifts in this range yet.</p>;

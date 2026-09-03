@@ -8,6 +8,7 @@
  */
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createShift, publishShifts, cancelShift, updateShift } from "@/actions/shifts";
 import { toDateTimeInputValue, formatShopDateTime, toShopDateKey, listShopDateKeysInRange } from "@/lib/dates";
 
@@ -36,6 +37,7 @@ function dayHeaderLabel(dateKey: string) {
 }
 
 function AddShiftForm({ employees }: { employees: Employee[] }) {
+  const router = useRouter();
   const [userId, setUserId] = useState(employees[0]?.id ?? "");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
@@ -85,6 +87,7 @@ function AddShiftForm({ employees }: { employees: Employee[] }) {
                 setStartAt("");
                 setEndAt("");
                 setRole("");
+                router.refresh();
               } else setError(r.error || "Could not add shift.");
             })
           }
@@ -98,6 +101,7 @@ function AddShiftForm({ employees }: { employees: Employee[] }) {
 }
 
 function ShiftRowItem({ shift }: { shift: ShiftRow }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [startAt, setStartAt] = useState(toDateTimeInputValue(shift.startAt));
   const [endAt, setEndAt] = useState(toDateTimeInputValue(shift.endAt));
@@ -120,8 +124,10 @@ function ShiftRowItem({ shift }: { shift: ShiftRow }) {
             onClick={() =>
               startTransition(async () => {
                 const r = await updateShift(shift.id, { startAt, endAt, role: role || undefined });
-                if (r.ok) setEditing(false);
-                else setError(r.error || "Could not save.");
+                if (r.ok) {
+                  setEditing(false);
+                  router.refresh();
+                } else setError(r.error || "Could not save.");
               })
             }
             className="focus-ring rounded bg-ink px-3 py-1 text-xs text-cream"
@@ -167,7 +173,8 @@ function ShiftRowItem({ shift }: { shift: ShiftRow }) {
             onClick={() =>
               startTransition(async () => {
                 const r = await publishShifts([shift.id]);
-                if (!r.ok) setError(r.error || "Could not publish.");
+                if (r.ok) router.refresh();
+                else setError(r.error || "Could not publish.");
               })
             }
             className="focus-ring rounded-lg border border-linen bg-white px-3 py-1 text-xs text-thread hover:border-thread/50"
@@ -184,7 +191,8 @@ function ShiftRowItem({ shift }: { shift: ShiftRow }) {
             const reason = prompt("Reason for cancelling this shift (optional):") ?? undefined;
             startTransition(async () => {
               const r = await cancelShift(shift.id, reason);
-              if (!r.ok) setError(r.error || "Could not cancel.");
+              if (r.ok) router.refresh();
+              else setError(r.error || "Could not cancel.");
             });
           }}
           className="focus-ring rounded-lg border border-alert/40 px-3 py-1 text-xs text-alert hover:bg-alert/10"
@@ -209,9 +217,10 @@ export function ScheduleBuilder({
   from: string;
   to: string;
 }) {
+  const router = useRouter();
   const draftIds = shifts.filter((s) => !s.publishedAt).map((s) => s.id);
   const [isPending, startTransition] = useTransition();
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar">("calendar");
 
   const byDay = new Map<string, ShiftRow[]>();
   for (const s of shifts) {
@@ -228,7 +237,12 @@ export function ScheduleBuilder({
         {draftIds.length > 0 ? (
           <button
             disabled={isPending}
-            onClick={() => startTransition(async () => { await publishShifts(draftIds); })}
+            onClick={() =>
+              startTransition(async () => {
+                const r = await publishShifts(draftIds);
+                if (r.ok) router.refresh();
+              })
+            }
             className="focus-ring rounded-lg bg-ink px-4 py-2 text-sm text-cream disabled:opacity-40"
           >
             Publish all {draftIds.length} draft shift{draftIds.length === 1 ? "" : "s"} in this range

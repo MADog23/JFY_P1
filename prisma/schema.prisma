@@ -308,7 +308,7 @@ model AuditLog {
   id            String   @id @default(cuid())
   orderId       String?
   order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  entityType    String // "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY"
+  entityType    String // "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY" | "PUNCH" | "SHIFT"
   entityId      String
   action        String // e.g. "INTAKE_CREATED", "STATUS_CHANGE", "PICKUP_AUTHORIZED"
   summary       String
@@ -318,6 +318,11 @@ model AuditLog {
 
   @@index([orderId])
   @@index([entityType, entityId])
+  // Serves the manager audit report (actions/audit-report.ts), which always filters by a
+  // date range first (optionally narrowed further by category/action or performedBy) —
+  // a plain index on createdAt covers that leading filter regardless of which optional
+  // filters are layered on top of it.
+  @@index([createdAt])
 }
 
 model GarmentTypeOption {

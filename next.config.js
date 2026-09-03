@@ -13,6 +13,16 @@
 // already small; this CSP is still worth having for the things it does fully stop
 // (framing, loading data from/to anywhere but this app's own origin) without betting the
 // whole build on getting a stricter policy exactly right blind.
+// `next dev`'s Fast Refresh/HMR runtime evaluates module code via eval() for fast,
+// source-mapped rebuilds — a production build (`next build` / `next start`, what
+// Railway actually runs) never does this. Without allowing it here, the CSP below
+// blocks that eval the instant the page tries to hydrate in dev mode, and the whole
+// app looks dead: it renders (server-rendered HTML is unaffected), but nothing
+// responds to a click because React never actually mounted client-side. NODE_ENV is
+// set to "production" automatically by both `next build` and `next start`, and to
+// "development" by `next dev`, so this never has to be set by hand.
+const isDev = process.env.NODE_ENV !== "production";
+
 const securityHeaders = [
   // Clickjacking: refuse to be framed by any other site (frame-ancestors is the modern,
   // CSP-based replacement for X-Frame-Options; both are set since some older clients
@@ -38,7 +48,9 @@ const securityHeaders = [
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
+      // 'unsafe-eval' is appended only in dev (see isDev above) — production keeps the
+      // exact same policy it's always had.
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",

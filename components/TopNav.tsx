@@ -30,6 +30,7 @@ export function TopNav({
   const manageLinks = [
     { href: "/manager/employees", label: "Staff" },
     { href: "/manager/taxonomy", label: "Garment options" },
+    { href: "/manager/audit", label: "Audit report" },
     { href: "/manager/account", label: "My account" },
   ];
   const managerLinks = [...phase2Links, analyticsLink, ...manageLinks];

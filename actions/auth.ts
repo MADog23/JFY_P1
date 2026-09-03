@@ -64,6 +64,17 @@ export async function employeeLogin(employeeId: string, pin: string): Promise<Ac
     return { ok: false, error: "Incorrect PIN." };
   }
 
+  // Logged same as a failed attempt (not just failures) — otherwise the audit trail
+  // can show someone hammering a PIN but never shows whether they eventually got in,
+  // which is the one thing you'd most want to know while reviewing it after the fact.
+  await logAudit({
+    entityType: "EMPLOYEE",
+    entityId: user.id,
+    action: "LOGIN_SUCCESS",
+    summary: `"${user.name}" logged in from ${ip}.`,
+    performedById: user.id,
+  });
+
   await createSession({ userId: user.id, name: user.name, role: "EMPLOYEE" });
   redirect("/employee");
 }
@@ -96,6 +107,16 @@ export async function managerLogin(email: string, password: string): Promise<Act
     });
     return { ok: false, error: "Incorrect email or password." };
   }
+
+  // See the matching comment in employeeLogin above — successful logins are logged
+  // right alongside failures so the audit trail shows the full picture, not just attempts.
+  await logAudit({
+    entityType: "EMPLOYEE",
+    entityId: user.id,
+    action: "LOGIN_SUCCESS",
+    summary: `"${user.name}" logged in from ${ip}.`,
+    performedById: user.id,
+  });
 
   await createSession({ userId: user.id, name: user.name, role: "MANAGER" });
   redirect("/manager");

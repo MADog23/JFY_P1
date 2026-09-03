@@ -5,15 +5,24 @@
  * phase2/PLAN.md's "Due diligence" section). This file answers "how many hours did
  * someone work," full stop — nothing here decides what that's worth or how it's paid.
  *
- * Design note: a Punch is a single timestamped event (CLOCK_IN / CLOCK_OUT /
- * BREAK_START / BREAK_END), not a stored "shift record" with a precomputed total. That
- * means correcting or voiding one bad punch (see actions/punches.ts) automatically
- * fixes every total derived from it — there's no separate cached number to go stale.
+ * Break vs lunch: BREAK_START/BREAK_END is a short paid break — it counts as worked time
+ * and is never subtracted. LUNCH_START/LUNCH_END is an unpaid meal period — it's
+ * subtracted from worked time. That's the one thing this file *does* decide, because it's
+ * a factual distinction (paid vs unpaid), not a pay-rate/overtime decision. It deliberately
+ * doesn't enforce any particular break/lunch length or count (e.g. "two 15s and a 30 for
+ * an 8-hour day") — the shop can vary that by policy or by how someone's hours change;
+ * this just needs to know which kind of pause is which so a total is never quietly wrong.
+ *
+ * Design note: a Punch is a single timestamped event (CLOCK_IN / CLOCK_OUT / BREAK_START /
+ * BREAK_END / LUNCH_START / LUNCH_END), not a stored "shift record" with a precomputed
+ * total. That means correcting or voiding one bad punch (see actions/punches.ts)
+ * automatically fixes every total derived from it — there's no separate cached number to
+ * go stale.
  */
 
 import { toShopDateKey } from "./dates";
 
-export type PunchType = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END";
+export type PunchType = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END" | "LUNCH_START" | "LUNCH_END";
 
 export type PunchLike = {
   id: string;
@@ -23,7 +32,7 @@ export type PunchLike = {
 
 export type BreakInterval = {
   start: Date;
-  end: Date | null; // null = break never ended (open, or forced-closed — see flags)
+  end: Date | null; // null = never ended (open, or forced-closed — see flags)
 };
 
 export type WorkSession = {
@@ -32,12 +41,15 @@ export type WorkSession = {
   clockIn: Date;
   /** null = still clocked in (an open/in-progress session, e.g. "right now"). */
   clockOut: Date | null;
+  /** Paid short breaks — tracked for visibility, never subtracted from workedMinutes. */
   breaks: BreakInterval[];
+  /** Unpaid meal periods — subtracted from workedMinutes. */
+  lunches: BreakInterval[];
   /**
-   * Minutes actually worked (clocked-in time minus completed breaks). Null while the
-   * session is still open (no clock-out yet) or has an unresolved anomaly that makes
-   * the number unreliable — see `flags`. A manager should review anything with flags
-   * before treating the total as final.
+   * Minutes actually worked (clocked-in time minus completed lunches — paid breaks are
+   * NOT subtracted). Null while the session is still open (no clock-out yet) or has an
+   * unresolved anomaly that makes the number unreliable — see `flags`. A manager should
+   * review anything with flags before treating the total as final.
    */
   workedMinutes: number | null;
   /** Human-readable anomalies worth a manager's attention — never silently dropped. */
@@ -45,13 +57,14 @@ export type WorkSession = {
 };
 
 /**
- * Turns a user's raw punches (any order) into a sequence of work sessions. Punches
- * that don't fit the expected CLOCK_IN → [BREAK_START → BREAK_END]* → CLOCK_OUT shape
- * (a missed clock-out, a double clock-in, a break with no matching end) are not
- * dropped — they're included with a `flags` entry explaining what looked wrong, so nothing
- * about a messy real-world day disappears silently. Void punches must be filtered out
- * by the caller before calling this (see actions/punches.ts) — this function has
- * no concept of "voided," it just processes whatever list it's given.
+ * Turns a user's raw punches (any order) into a sequence of work sessions. Punches that
+ * don't fit the expected CLOCK_IN → [BREAK_START → BREAK_END | LUNCH_START → LUNCH_END]* →
+ * CLOCK_OUT shape (a missed clock-out, a double clock-in, a break/lunch with no matching
+ * end, a break started while already on lunch) are not dropped — they're included with a
+ * `flags` entry explaining what looked wrong, so nothing about a messy real-world day
+ * disappears silently. Void punches must be filtered out by the caller before calling this
+ * (see actions/punches.ts) — this function has no concept of "voided," it just processes
+ * whatever list it's given.
  */
 export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
   const sorted = [...punches].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
@@ -59,16 +72,26 @@ export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
 
   let current: WorkSession | null = null;
   let openBreak: BreakInterval | null = null;
+  let openLunch: BreakInterval | null = null;
+
+  function newSession(punchId: string, timestamp: Date, flags: string[] = []): WorkSession {
+    return { punchIds: [punchId], clockIn: timestamp, clockOut: null, breaks: [], lunches: [], workedMinutes: null, flags };
+  }
 
   function closeCurrent() {
     if (!current) return;
     if (openBreak) {
-      // Clocked out (or a new clock-in arrived) while still "on break" — close the break
-      // at the same moment rather than leaving it dangling, but flag it: this means
-      // someone forgot to tap "end break."
+      // Clocked out (or a new clock-in arrived) while still "on break" — close it at the
+      // same moment rather than leaving it dangling, but flag it: this means someone
+      // forgot to tap "end break."
       openBreak.end = current.clockOut ?? openBreak.start;
       current.flags.push("Break was never explicitly ended — auto-closed at clock-out.");
       openBreak = null;
+    }
+    if (openLunch) {
+      openLunch.end = current.clockOut ?? openLunch.start;
+      current.flags.push("Lunch was never explicitly ended — auto-closed at clock-out.");
+      openLunch = null;
     }
     current.workedMinutes = computeWorkedMinutes(current);
     sessions.push(current);
@@ -85,19 +108,13 @@ export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
           current.flags.push("Clocked in again before a matching clock-out — previous session left open.");
           closeCurrentAsOpen();
         }
-        current = { punchIds: [punch.id], clockIn: punch.timestamp, clockOut: null, breaks: [], workedMinutes: null, flags: [] };
+        current = newSession(punch.id, punch.timestamp);
         break;
       }
       case "CLOCK_OUT": {
         if (!current) {
-          sessions.push({
-            punchIds: [punch.id],
-            clockIn: punch.timestamp,
-            clockOut: punch.timestamp,
-            breaks: [],
-            workedMinutes: null,
-            flags: ["Clock-out with no matching clock-in — needs a manager to add the missing punch."],
-          });
+          sessions.push(newSession(punch.id, punch.timestamp, ["Clock-out with no matching clock-in — needs a manager to add the missing punch."]));
+          sessions[sessions.length - 1].clockOut = punch.timestamp;
           break;
         }
         current.punchIds.push(punch.id);
@@ -107,14 +124,11 @@ export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
       }
       case "BREAK_START": {
         if (!current) {
-          sessions.push({
-            punchIds: [punch.id],
-            clockIn: punch.timestamp,
-            clockOut: null,
-            breaks: [],
-            workedMinutes: null,
-            flags: ["Break started with no active clock-in — needs a manager to review."],
-          });
+          sessions.push(newSession(punch.id, punch.timestamp, ["Break started with no active clock-in — needs a manager to review."]));
+          break;
+        }
+        if (openLunch) {
+          current.flags.push("Break started while already on lunch — ignored.");
           break;
         }
         if (openBreak) {
@@ -137,6 +151,35 @@ export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
         openBreak = null;
         break;
       }
+      case "LUNCH_START": {
+        if (!current) {
+          sessions.push(newSession(punch.id, punch.timestamp, ["Lunch started with no active clock-in — needs a manager to review."]));
+          break;
+        }
+        if (openBreak) {
+          current.flags.push("Lunch started while already on a break — ignored.");
+          break;
+        }
+        if (openLunch) {
+          current.flags.push("Lunch started again while already on lunch — ignored the extra start.");
+          break;
+        }
+        current.punchIds.push(punch.id);
+        openLunch = { start: punch.timestamp, end: null };
+        current.lunches.push(openLunch);
+        break;
+      }
+      case "LUNCH_END": {
+        if (!current || !openLunch) {
+          const target = current ?? sessions[sessions.length - 1];
+          target?.flags.push("Lunch ended with no matching lunch-start — ignored.");
+          break;
+        }
+        current.punchIds.push(punch.id);
+        openLunch.end = punch.timestamp;
+        openLunch = null;
+        break;
+      }
     }
   }
 
@@ -156,19 +199,22 @@ export function pairPunchesIntoSessions(punches: PunchLike[]): WorkSession[] {
     sessions.push(current);
     current = null;
     openBreak = null;
+    openLunch = null;
   }
 }
 
 function computeWorkedMinutes(session: WorkSession): number | null {
   if (!session.clockOut) return null;
-  if (session.breaks.some((b) => b.end === null)) return null;
+  if (session.lunches.some((l) => l.end === null)) return null;
 
   const totalMs = session.clockOut.getTime() - session.clockIn.getTime();
-  const breakMs = session.breaks.reduce((sum, b) => sum + (b.end!.getTime() - b.start.getTime()), 0);
-  const workedMs = totalMs - breakMs;
+  // Paid breaks are intentionally excluded from this subtraction — only unpaid lunches
+  // reduce worked time.
+  const lunchMs = session.lunches.reduce((sum, l) => sum + (l.end!.getTime() - l.start.getTime()), 0);
+  const workedMs = totalMs - lunchMs;
 
   if (workedMs < 0) {
-    session.flags.push("Computed negative worked time (clock-out before clock-in, or breaks longer than the shift) — needs review.");
+    session.flags.push("Computed negative worked time (clock-out before clock-in, or lunches longer than the shift) — needs review.");
     return null;
   }
 
@@ -229,7 +275,7 @@ export function formatMinutesAsHours(minutes: number): string {
 
 /** What to show on a "clock in / out" button right now, derived from a user's most
  * recent punches (today plus a little lookback for an overnight shift in progress). */
-export type CurrentPunchState = "CLOCKED_OUT" | "CLOCKED_IN" | "ON_BREAK";
+export type CurrentPunchState = "CLOCKED_OUT" | "CLOCKED_IN" | "ON_BREAK" | "ON_LUNCH";
 
 export function currentPunchState(recentPunches: PunchLike[]): CurrentPunchState {
   const sessions = pairPunchesIntoSessions(recentPunches);
@@ -237,5 +283,7 @@ export function currentPunchState(recentPunches: PunchLike[]): CurrentPunchState
   if (!last || last.clockOut !== null) return "CLOCKED_OUT";
   const lastBreak = last.breaks[last.breaks.length - 1];
   if (lastBreak && lastBreak.end === null) return "ON_BREAK";
+  const lastLunch = last.lunches[last.lunches.length - 1];
+  if (lastLunch && lastLunch.end === null) return "ON_LUNCH";
   return "CLOCKED_IN";
 }

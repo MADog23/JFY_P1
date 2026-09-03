@@ -1,15 +1,19 @@
 "use client";
 
 /**
- * Employee-facing clock in/out/break control. Big, unambiguous buttons on
+ * Employee-facing clock in/out/break/lunch control. Big, unambiguous buttons on
  * purpose: this is meant to work as well on a shared kiosk-style tablet at the front
  * counter as it does on someone's own phone, and Homebase's whole complaint was that
  * punches go missing or land wrong — this should never leave someone unsure whether
  * their tap registered.
+ *
+ * Break vs lunch is a real, deliberate distinction, not just two labels for the same
+ * thing: a break is short and PAID (counts as worked time); lunch is unpaid and gets
+ * subtracted. See lib/hours.ts's header for the full reasoning.
  */
 
 import { useState, useTransition } from "react";
-import { clockIn, clockOut, startBreak, endBreak } from "@/actions/punches";
+import { clockIn, clockOut, startBreak, endBreak, startLunch, endLunch } from "@/actions/punches";
 import type { CurrentPunchState } from "@/lib/hours";
 import { formatShopDateTime } from "@/lib/dates";
 
@@ -23,13 +27,15 @@ function nowLabel() {
 const STATE_LABEL: Record<CurrentPunchState, string> = {
   CLOCKED_OUT: "You're clocked out",
   CLOCKED_IN: "You're clocked in",
-  ON_BREAK: "You're on a break",
+  ON_BREAK: "You're on a break (paid)",
+  ON_LUNCH: "You're on lunch (unpaid)",
 };
 
 const STATE_COLOR: Record<CurrentPunchState, string> = {
   CLOCKED_OUT: "text-charcoal/60",
   CLOCKED_IN: "text-sage",
   ON_BREAK: "text-brass",
+  ON_LUNCH: "text-brass",
 };
 
 export function ClockPad({ initialState }: { initialState: CurrentPunchState }) {
@@ -82,7 +88,14 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
               onClick={() => run(startBreak, "ON_BREAK", `Break started at ${nowLabel()}.`)}
               className="focus-ring rounded-xl border border-linen bg-white px-6 py-3 text-sm font-medium text-charcoal/80 hover:border-thread/50 disabled:opacity-40"
             >
-              Start break
+              Start break (paid)
+            </button>
+            <button
+              disabled={isPending}
+              onClick={() => run(startLunch, "ON_LUNCH", `Lunch started at ${nowLabel()}.`)}
+              className="focus-ring rounded-xl border border-linen bg-white px-6 py-3 text-sm font-medium text-charcoal/80 hover:border-thread/50 disabled:opacity-40"
+            >
+              Start lunch (unpaid)
             </button>
           </>
         )}
@@ -94,6 +107,16 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
             className="focus-ring rounded-xl bg-ink px-6 py-4 text-lg font-medium text-cream disabled:opacity-40"
           >
             End break
+          </button>
+        )}
+
+        {state === "ON_LUNCH" && (
+          <button
+            disabled={isPending}
+            onClick={() => run(endLunch, "CLOCKED_IN", `Lunch ended at ${nowLabel()}.`)}
+            className="focus-ring rounded-xl bg-ink px-6 py-4 text-lg font-medium text-cream disabled:opacity-40"
+          >
+            End lunch
           </button>
         )}
       </div>

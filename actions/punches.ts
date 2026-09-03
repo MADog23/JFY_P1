@@ -81,17 +81,20 @@ export async function clockIn(): Promise<ActionResult> {
   return recordPunch(session.userId, session.userId, "CLOCK_IN");
 }
 
-/** Self-service clock out. Requires being clocked in and NOT currently on break — ending
- * the break first is a deliberate, separate step rather than an automatic side effect,
- * so the break's actual end time is always a real tap, not an inferred guess. */
+/** Self-service clock out. Requires being clocked in and NOT currently on a break or
+ * lunch — ending it first is a deliberate, separate step rather than an automatic side
+ * effect, so the actual end time is always a real tap, not an inferred guess. */
 export async function clockOut(): Promise<ActionResult> {
   const session = await requireSession();
   const state = await getPunchStateForUserId(session.userId);
   if (state === "CLOCKED_OUT") return { ok: false, error: "You're not clocked in." };
   if (state === "ON_BREAK") return { ok: false, error: "End your break before clocking out." };
+  if (state === "ON_LUNCH") return { ok: false, error: "End your lunch before clocking out." };
   return recordPunch(session.userId, session.userId, "CLOCK_OUT");
 }
 
+/** A short PAID break — counts as worked time (see lib/hours.ts's computeWorkedMinutes).
+ * For an unpaid meal period, use startLunch/endLunch instead. */
 export async function startBreak(): Promise<ActionResult> {
   const session = await requireSession();
   const state = await getPunchStateForUserId(session.userId);
@@ -104,6 +107,22 @@ export async function endBreak(): Promise<ActionResult> {
   const state = await getPunchStateForUserId(session.userId);
   if (state !== "ON_BREAK") return { ok: false, error: "You're not on a break." };
   return recordPunch(session.userId, session.userId, "BREAK_END");
+}
+
+/** An UNPAID meal period — subtracted from worked time (see lib/hours.ts's
+ * computeWorkedMinutes). For a short paid break, use startBreak/endBreak instead. */
+export async function startLunch(): Promise<ActionResult> {
+  const session = await requireSession();
+  const state = await getPunchStateForUserId(session.userId);
+  if (state !== "CLOCKED_IN") return { ok: false, error: "Clock in before starting lunch." };
+  return recordPunch(session.userId, session.userId, "LUNCH_START");
+}
+
+export async function endLunch(): Promise<ActionResult> {
+  const session = await requireSession();
+  const state = await getPunchStateForUserId(session.userId);
+  if (state !== "ON_LUNCH") return { ok: false, error: "You're not on lunch." };
+  return recordPunch(session.userId, session.userId, "LUNCH_END");
 }
 
 // from/to are plain "YYYY-MM-DD" dates (see lib/dates.ts's toDateInputValue); shopDayStart/

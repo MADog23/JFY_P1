@@ -26,7 +26,9 @@ type RawPunch = {
   voidReason: string | null;
 };
 
-const PUNCH_TYPES: PunchType[] = ["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"];
+// BREAK = paid, LUNCH = unpaid — see lib/hours.ts's header for why that distinction
+// matters for the totals this list feeds into.
+const PUNCH_TYPES: PunchType[] = ["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END", "LUNCH_START", "LUNCH_END"];
 
 function PunchRow({ punch }: { punch: RawPunch }) {
   const [editing, setEditing] = useState(false);

@@ -355,11 +355,17 @@ model OrderCounter {
 // No pay rate, no overtime multiplier, no payroll export — see lib/hours.ts's header.
 // That's on hold until how payroll/accounting actually runs today is confirmed.
 
+// BREAK_START/BREAK_END = a short paid break (counted as worked time, not subtracted).
+// LUNCH_START/LUNCH_END = an unpaid meal period (subtracted from worked time). See
+// lib/hours.ts's computeWorkedMinutes for exactly where that distinction is applied — the
+// shop doesn't hardcode break/lunch lengths or counts here, just which kind is paid.
 enum PunchType {
   CLOCK_IN
   CLOCK_OUT
   BREAK_START
   BREAK_END
+  LUNCH_START
+  LUNCH_END
 }
 
 // A punch is a single timestamped event, not a stored "shift record" — mirrors how an

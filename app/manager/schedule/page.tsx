@@ -38,7 +38,7 @@ export default async function ManagerSchedulePage({
         <p className="mb-6 text-sm text-charcoal/60">
           Shifts {from} – {to}. Staff only see a shift once it's published.
         </p>
-        <ScheduleBuilder employees={employees} shifts={shifts as any} />
+        <ScheduleBuilder employees={employees} shifts={shifts as any} from={from} to={to} />
       </main>
     </>
   );

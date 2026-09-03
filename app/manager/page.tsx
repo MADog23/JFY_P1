@@ -1,19 +1,21 @@
 import Link from "next/link";
 import { requireManager } from "@/lib/auth";
-import { listOrders } from "@/actions/orders";
+import { listOrders, type OrderListSort } from "@/actions/orders";
 import { TopNav } from "@/components/TopNav";
 import { OrderList } from "@/components/OrderList";
 import { OrderSearchBar } from "@/components/OrderSearchBar";
+import { OrderSortSelect } from "@/components/OrderSortSelect";
 
 export default async function ManagerDashboard({
   searchParams,
 }: {
-  searchParams: { filter?: string; search?: string; from?: string; to?: string; mine?: string; page?: string };
+  searchParams: { filter?: string; search?: string; from?: string; to?: string; mine?: string; sort?: string; page?: string };
 }) {
   const session = await requireManager();
   const filter = (searchParams.filter as any) || "ACTIVE";
   const { search, from, to } = searchParams;
   const mine = searchParams.mine === "1";
+  const sort = searchParams.sort as OrderListSort | undefined;
   const page = Math.max(parseInt(searchParams.page ?? "1", 10) || 1, 1);
   const { orders, total, pageSize, hasMore } = await listOrders({
     filter,
@@ -21,6 +23,7 @@ export default async function ManagerDashboard({
     from,
     to,
     assignedToId: mine ? session.userId : undefined,
+    sort,
     page,
   });
   const hasSearch = !!(search || from || to || mine);
@@ -32,6 +35,7 @@ export default async function ManagerDashboard({
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     if (mine) params.set("mine", "1");
+    if (sort) params.set("sort", sort);
     return `/manager?${params.toString()}`;
   }
 
@@ -42,6 +46,7 @@ export default async function ManagerDashboard({
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     if (!mine) params.set("mine", "1");
+    if (sort) params.set("sort", sort);
     return `/manager?${params.toString()}`;
   }
 
@@ -52,6 +57,7 @@ export default async function ManagerDashboard({
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     if (mine) params.set("mine", "1");
+    if (sort) params.set("sort", sort);
     params.set("page", String(value));
     return `/manager?${params.toString()}`;
   }
@@ -105,6 +111,7 @@ export default async function ManagerDashboard({
           >
             Assigned to me
           </Link>
+          <OrderSortSelect />
         </div>
 
         <OrderList

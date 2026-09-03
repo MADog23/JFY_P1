@@ -14,6 +14,30 @@ import { recomputeOrderStatus } from "@/lib/order-status";
 import type { ActionResult } from "./auth";
 
 export type OrderListFilter = "ACTIVE" | "SEALED" | "PICKED_UP" | "CANCELLED" | "ALL";
+export type OrderListSort = "NEWEST" | "OLDEST" | "ORDER_NUMBER" | "DUE_DATE" | "CLIENT_NAME";
+
+/** Order numbers are a plain auto-incrementing counter handed out at creation time (see
+ * lib/order-number.ts), so for real tickets "newest first" and "highest order number
+ * first" land in the same order anyway — ORDER_NUMBER is here as its own explicit
+ * option mainly so the list can be pinned to the literal ticket sequence regardless of
+ * createdAt, e.g. while double-checking things after backdated demo/seed data. */
+function resolveOrderBy(sort?: OrderListSort): Prisma.OrderOrderByWithRelationInput {
+  switch (sort) {
+    case "OLDEST":
+      return { createdAt: "asc" };
+    case "ORDER_NUMBER":
+      return { orderNumber: "desc" };
+    case "DUE_DATE":
+      // nulls: "last" keeps orders with no due date set from sorting as if they were
+      // due today — they fall to the bottom instead of jumping the whole line.
+      return { dueDate: { sort: "asc", nulls: "last" } };
+    case "CLIENT_NAME":
+      return { clientName: "asc" };
+    case "NEWEST":
+    default:
+      return { createdAt: "desc" };
+  }
+}
 
 /**
  * `search` matches against everything captured about the client at intake — name,
@@ -31,11 +55,12 @@ export async function listOrders(params?: {
   from?: string;
   to?: string;
   assignedToId?: string;
+  sort?: OrderListSort;
   page?: number;
   pageSize?: number;
 }) {
   await requireSession();
-  const { filter, search, from, to, assignedToId } = params ?? {};
+  const { filter, search, from, to, assignedToId, sort } = params ?? {};
   // Offset-based, not cursor-based: this table's ids are cuids (not sortable the way an
   // auto-increment or ULID would be), and orderBy is createdAt not id, so a Prisma
   // cursor here would mean carrying the last row's createdAt around as the cursor
@@ -88,7 +113,7 @@ export async function listOrders(params?: {
   const [orders, total] = await Promise.all([
     db.order.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: resolveOrderBy(sort),
       select: {
         id: true,
         orderNumber: true,

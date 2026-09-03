@@ -16,9 +16,9 @@ export default async function EmployeeSchedulePage() {
   const session = await requireSession();
 
   const now = new Date();
-  const from = startOfWeek(now);
-  const to = endOfWeek(now);
-  const shifts = await listMyShiftsForRange(toDateInputValue(from), toDateInputValue(to));
+  const from = toDateInputValue(startOfWeek(now));
+  const to = toDateInputValue(endOfWeek(now));
+  const shifts = await listMyShiftsForRange(from, to);
 
   return (
     <>
@@ -26,7 +26,7 @@ export default async function EmployeeSchedulePage() {
       <main className="mx-auto max-w-lg px-4 py-8">
         <h1 className="font-display text-2xl text-ink">My schedule</h1>
         <p className="mb-6 text-sm text-charcoal/60">This week's published shifts.</p>
-        <MyScheduleList shifts={shifts} />
+        <MyScheduleList shifts={shifts} from={from} to={to} />
       </main>
     </>
   );

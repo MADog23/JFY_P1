@@ -9,7 +9,7 @@ export function MobileNavMenu({ links }: { links: { href: string; label: string 
   if (links.length === 0) return null;
 
   return (
-    <div className="relative sm:hidden">
+    <div className="sm:hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Open menu"
@@ -24,7 +24,11 @@ export function MobileNavMenu({ links }: { links: { href: string; label: string 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-2 w-48 rounded-xl border border-linen bg-white p-1.5 shadow-lg">
+          {/* Fixed (not absolute) and anchored with explicit viewport coordinates —
+              this used to be `absolute left-0 top-full` relative to the button's own
+              wrapper, which rendered it detached from the button on real devices.
+              left-4/top-16 line up with the header's own px-4/py-3 padding. */}
+          <div className="fixed left-4 top-16 z-20 w-48 rounded-xl border border-linen bg-white p-1.5 shadow-lg">
             {links.map((link) => (
               <Link
                 key={link.href}

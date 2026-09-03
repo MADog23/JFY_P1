@@ -9,14 +9,21 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireSession, requireManager } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { shopDateTimeLocalSchema, shopDayStart, shopDayEnd } from "@/lib/dates";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
+// startAt/endAt arrive as raw `datetime-local` strings (e.g. "2026-09-02T19:06") — see
+// components/ScheduleBuilder.tsx. shopDateTimeLocalSchema always interprets that as a
+// wall-clock time in the shop's own timezone (lib/dates.ts's SHOP_TIME_ZONE), regardless
+// of what timezone the manager's own device happens to be set to. Using z.coerce.date()
+// here instead would parse the string using the SERVER's ambient timezone, which is how
+// a shift entered as "7:06 PM" ended up stored (and later displayed) as 5 hours later.
 const shiftInputSchema = z
   .object({
     userId: z.string().min(1, "Choose an employee."),
-    startAt: z.coerce.date(),
-    endAt: z.coerce.date(),
+    startAt: shopDateTimeLocalSchema,
+    endAt: shopDateTimeLocalSchema,
     role: z.string().trim().max(80).optional(),
     note: z.string().trim().max(500).optional(),
   })
@@ -70,7 +77,7 @@ export async function updateShift(
   if (!existing || existing.cancelledAt) return { ok: false, error: "Shift not found." };
 
   const parsed = z
-    .object({ startAt: z.coerce.date(), endAt: z.coerce.date(), role: z.string().trim().max(80).optional(), note: z.string().trim().max(500).optional() })
+    .object({ startAt: shopDateTimeLocalSchema, endAt: shopDateTimeLocalSchema, role: z.string().trim().max(80).optional(), note: z.string().trim().max(500).optional() })
     .refine((v) => v.endAt > v.startAt, { message: "End time must be after the start time.", path: ["endAt"] })
     .safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -138,7 +145,14 @@ export async function cancelShift(shiftId: string, reason?: string): Promise<Act
   return { ok: true };
 }
 
-const rangeSchema = z.object({ from: z.coerce.date(), to: z.coerce.date() });
+// from/to are plain "YYYY-MM-DD" dates (see lib/dates.ts's toDateInputValue); shopDayStart/
+// shopDayEnd anchor them to shop-local day boundaries instead of z.coerce.date()'s default
+// of parsing "YYYY-MM-DD" as UTC midnight, which is actually late evening the previous day
+// in the shop's own timezone.
+const rangeSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date.").transform(shopDayStart),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date.").transform(shopDayEnd),
+});
 
 /** MANAGER: every shift (draft + published, not cancelled) in a date range, for one
  * employee or everyone — the schedule-building view. */

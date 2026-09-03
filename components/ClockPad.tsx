@@ -11,6 +11,14 @@
 import { useState, useTransition } from "react";
 import { clockIn, clockOut, startBreak, endBreak } from "@/actions/punches";
 import type { CurrentPunchState } from "@/lib/hours";
+import { formatShopDateTime } from "@/lib/dates";
+
+// Always shown in the shop's own timezone (see lib/dates.ts) so this confirmation always
+// matches the timestamp a manager will later see on the punch itself, even if this
+// device's own clock/timezone is set to something else.
+function nowLabel() {
+  return formatShopDateTime(new Date(), { hour: "numeric", minute: "2-digit" });
+}
 
 const STATE_LABEL: Record<CurrentPunchState, string> = {
   CLOCKED_OUT: "You're clocked out",
@@ -53,7 +61,7 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
         {state === "CLOCKED_OUT" && (
           <button
             disabled={isPending}
-            onClick={() => run(clockIn, "CLOCKED_IN", `Clocked in at ${new Date().toLocaleTimeString()}.`)}
+            onClick={() => run(clockIn, "CLOCKED_IN", `Clocked in at ${nowLabel()}.`)}
             className="focus-ring rounded-xl bg-ink px-6 py-4 text-lg font-medium text-cream disabled:opacity-40"
           >
             Clock in
@@ -64,14 +72,14 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
           <>
             <button
               disabled={isPending}
-              onClick={() => run(clockOut, "CLOCKED_OUT", `Clocked out at ${new Date().toLocaleTimeString()}.`)}
+              onClick={() => run(clockOut, "CLOCKED_OUT", `Clocked out at ${nowLabel()}.`)}
               className="focus-ring rounded-xl bg-ink px-6 py-4 text-lg font-medium text-cream disabled:opacity-40"
             >
               Clock out
             </button>
             <button
               disabled={isPending}
-              onClick={() => run(startBreak, "ON_BREAK", `Break started at ${new Date().toLocaleTimeString()}.`)}
+              onClick={() => run(startBreak, "ON_BREAK", `Break started at ${nowLabel()}.`)}
               className="focus-ring rounded-xl border border-linen bg-white px-6 py-3 text-sm font-medium text-charcoal/80 hover:border-thread/50 disabled:opacity-40"
             >
               Start break
@@ -82,7 +90,7 @@ export function ClockPad({ initialState }: { initialState: CurrentPunchState }) 
         {state === "ON_BREAK" && (
           <button
             disabled={isPending}
-            onClick={() => run(endBreak, "CLOCKED_IN", `Break ended at ${new Date().toLocaleTimeString()}.`)}
+            onClick={() => run(endBreak, "CLOCKED_IN", `Break ended at ${nowLabel()}.`)}
             className="focus-ring rounded-xl bg-ink px-6 py-4 text-lg font-medium text-cream disabled:opacity-40"
           >
             End break

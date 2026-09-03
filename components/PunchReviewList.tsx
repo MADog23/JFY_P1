@@ -11,7 +11,7 @@
 import { useState, useTransition } from "react";
 import { correctPunch, voidPunch, addManualPunch } from "@/actions/punches";
 import type { PunchType } from "@/lib/hours";
-import { toDateTimeInputValue } from "@/lib/dates";
+import { toDateTimeInputValue, formatShopDateTime } from "@/lib/dates";
 
 type RawPunch = {
   id: string;
@@ -38,7 +38,7 @@ function PunchRow({ punch }: { punch: RawPunch }) {
   if (punch.voidedAt) {
     return (
       <tr className="border-b border-linen/60 text-charcoal/40 last:border-0">
-        <td className="px-3 py-2 line-through">{new Date(punch.timestamp).toLocaleString()}</td>
+        <td className="px-3 py-2 line-through">{formatShopDateTime(punch.timestamp, { dateStyle: "medium", timeStyle: "short" })}</td>
         <td className="px-3 py-2 line-through">{punch.type.replace("_", " ")}</td>
         <td className="px-3 py-2 text-[11px]" colSpan={2}>
           Voided by {punch.voidedBy?.name}: {punch.voidReason}
@@ -78,7 +78,9 @@ function PunchRow({ punch }: { punch: RawPunch }) {
               disabled={isPending}
               onClick={() =>
                 startTransition(async () => {
-                  const r = await correctPunch(punch.id, new Date(timestamp).toISOString(), type);
+                  // Pass the raw datetime-local string through — the server interprets it as
+                  // shop-local time (see actions/punches.ts), not this browser's own timezone.
+                  const r = await correctPunch(punch.id, timestamp, type);
                   if (r.ok) setEditing(false);
                   else setError(r.error || "Could not save.");
                 })
@@ -106,7 +108,7 @@ function PunchRow({ punch }: { punch: RawPunch }) {
 
   return (
     <tr className="border-b border-linen/60 last:border-0">
-      <td className="px-3 py-2 text-ink">{new Date(punch.timestamp).toLocaleString()}</td>
+      <td className="px-3 py-2 text-ink">{formatShopDateTime(punch.timestamp, { dateStyle: "medium", timeStyle: "short" })}</td>
       <td className="px-3 py-2 text-ink">{punch.type.replace("_", " ")}</td>
       <td className="px-3 py-2 text-[11px] text-charcoal/50">
         {punch.createdBy.id === punch.editedBy?.id || !punch.editedBy
@@ -174,7 +176,7 @@ function AddMissedPunchForm({ userId }: { userId: string }) {
           onClick={() =>
             startTransition(async () => {
               setAdded(false);
-              const r = await addManualPunch(userId, type, new Date(timestamp).toISOString(), note);
+              const r = await addManualPunch(userId, type, timestamp, note);
               if (r.ok) {
                 setAdded(true);
                 setTimestamp("");

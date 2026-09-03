@@ -14,6 +14,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireSession, requireManager } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { shopDateTimeLocalSchema, shopDayStart, shopDayEnd } from "@/lib/dates";
 import {
   type PunchLike,
   type PunchType,
@@ -105,9 +106,13 @@ export async function endBreak(): Promise<ActionResult> {
   return recordPunch(session.userId, session.userId, "BREAK_END");
 }
 
+// from/to are plain "YYYY-MM-DD" dates (see lib/dates.ts's toDateInputValue); shopDayStart/
+// shopDayEnd anchor them to shop-local day boundaries instead of z.coerce.date()'s default
+// of parsing "YYYY-MM-DD" as UTC midnight, which is actually late evening the previous day
+// in the shop's own timezone.
 const rangeSchema = z.object({
-  from: z.coerce.date(),
-  to: z.coerce.date(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date.").transform(shopDayStart),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date.").transform(shopDayEnd),
 });
 
 /** Self-service: the signed-in user's own daily hours totals for a date range. No other
@@ -171,7 +176,7 @@ export async function addManualPunch(
   note?: string
 ): Promise<ActionResult> {
   const session = await requireManager();
-  const parsedTimestamp = z.coerce.date().safeParse(timestamp);
+  const parsedTimestamp = shopDateTimeLocalSchema.safeParse(timestamp);
   if (!parsedTimestamp.success) return { ok: false, error: "Enter a valid date/time." };
 
   const target = await db.user.findUnique({ where: { id: targetUserId }, select: { id: true, name: true } });
@@ -207,7 +212,7 @@ export async function correctPunch(
   newType: PunchType
 ): Promise<ActionResult> {
   const session = await requireManager();
-  const parsedTimestamp = z.coerce.date().safeParse(newTimestamp);
+  const parsedTimestamp = shopDateTimeLocalSchema.safeParse(newTimestamp);
   if (!parsedTimestamp.success) return { ok: false, error: "Enter a valid date/time." };
 
   const existing = await db.punch.findUnique({ where: { id: punchId } });

@@ -4,6 +4,8 @@
  * a server component — no client interactivity needed here.
  */
 
+import { formatShopDateTime } from "@/lib/dates";
+
 type ShiftRow = {
   id: string;
   startAt: Date | string;
@@ -12,11 +14,14 @@ type ShiftRow = {
   note: string | null;
 };
 
+// Always shown in the shop's own timezone (see lib/dates.ts) — this is a server
+// component, so without an explicit timeZone these would render in whatever timezone the
+// server itself happens to be set to (Railway, most likely UTC), not the employee's.
 function fmtDay(d: Date | string) {
-  return new Date(d).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  return formatShopDateTime(d, { weekday: "long", month: "long", day: "numeric" });
 }
 function fmtTime(d: Date | string) {
-  return new Date(d).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return formatShopDateTime(d, { hour: "numeric", minute: "2-digit" });
 }
 
 export function MyScheduleList({ shifts }: { shifts: ShiftRow[] }) {

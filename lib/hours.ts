@@ -11,6 +11,8 @@
  * fixes every total derived from it — there's no separate cached number to go stale.
  */
 
+import { toShopDateKey } from "./dates";
+
 export type PunchType = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END";
 
 export type PunchLike = {
@@ -174,8 +176,10 @@ function computeWorkedMinutes(session: WorkSession): number | null {
 }
 
 export type DaySummary = {
-  /** Calendar date the session's clock-in fell on, as YYYY-MM-DD (server-local time). A
-   *  session that crosses midnight is attributed to the day it *started*, not split. */
+  /** Calendar date the session's clock-in fell on, as YYYY-MM-DD in the shop's own
+   *  timezone (see lib/dates.ts's SHOP_TIME_ZONE) — not UTC, which would put a lot of
+   *  evening sessions under the wrong (next) day. A session that crosses midnight is
+   *  attributed to the day it *started*, not split. */
   date: string;
   totalMinutes: number;
   /** Sessions still missing a total (open, or flagged) are excluded from totalMinutes,
@@ -186,7 +190,7 @@ export type DaySummary = {
 };
 
 function toDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return toShopDateKey(d);
 }
 
 /** Groups a set of sessions (already produced by pairPunchesIntoSessions) into one

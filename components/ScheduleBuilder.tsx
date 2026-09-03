@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from "react";
 import { createShift, publishShifts, cancelShift, updateShift } from "@/actions/shifts";
-import { toDateTimeInputValue } from "@/lib/dates";
+import { toDateTimeInputValue, formatShopDateTime } from "@/lib/dates";
 
 type Employee = { id: string; name: string };
 type ShiftRow = {
@@ -23,7 +23,9 @@ type ShiftRow = {
 };
 
 function fmt(d: Date | string) {
-  return new Date(d).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  // Always shown in the shop's own timezone (see lib/dates.ts) — not whichever timezone
+  // this browser happens to be set to — so this always matches what the employee sees.
+  return formatShopDateTime(d, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function AddShiftForm({ employees }: { employees: Employee[] }) {
@@ -68,7 +70,9 @@ function AddShiftForm({ employees }: { employees: Employee[] }) {
           onClick={() =>
             startTransition(async () => {
               setAdded(false);
-              const r = await createShift({ userId, startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString(), role: role || undefined });
+              // Pass the raw datetime-local string through as-is — the server interprets it
+              // as shop-local time (see actions/shifts.ts), not this browser's own timezone.
+              const r = await createShift({ userId, startAt, endAt, role: role || undefined });
               if (r.ok) {
                 setAdded(true);
                 setStartAt("");
@@ -108,7 +112,7 @@ function ShiftRowItem({ shift }: { shift: ShiftRow }) {
             disabled={isPending}
             onClick={() =>
               startTransition(async () => {
-                const r = await updateShift(shift.id, { startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString(), role: role || undefined });
+                const r = await updateShift(shift.id, { startAt, endAt, role: role || undefined });
                 if (r.ok) setEditing(false);
                 else setError(r.error || "Could not save.");
               })

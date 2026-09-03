@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from "react";
 import { createShift, publishShifts, cancelShift, updateShift } from "@/actions/shifts";
-import { toDateTimeInputValue, formatShopDateTime } from "@/lib/dates";
+import { toDateTimeInputValue, formatShopDateTime, toShopDateKey, listShopDateKeysInRange } from "@/lib/dates";
 
 type Employee = { id: string; name: string };
 type ShiftRow = {
@@ -26,6 +26,13 @@ function fmt(d: Date | string) {
   // Always shown in the shop's own timezone (see lib/dates.ts) — not whichever timezone
   // this browser happens to be set to — so this always matches what the employee sees.
   return formatShopDateTime(d, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function dayHeaderLabel(dateKey: string) {
+  // dateKey is a plain YYYY-MM-DD — format it as a shop-local date without going through
+  // a UTC instant that could land on the wrong side of midnight for the reader.
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function AddShiftForm({ employees }: { employees: Employee[] }) {
@@ -189,31 +196,90 @@ function ShiftRowItem({ shift }: { shift: ShiftRow }) {
   );
 }
 
-export function ScheduleBuilder({ employees, shifts }: { employees: Employee[]; shifts: ShiftRow[] }) {
+export function ScheduleBuilder({
+  employees,
+  shifts,
+  from,
+  to,
+}: {
+  employees: Employee[];
+  shifts: ShiftRow[];
+  /** YYYY-MM-DD bounds of the range being shown — used only to lay out the calendar
+   * view's day columns (so a day with zero shifts still gets a column). */
+  from: string;
+  to: string;
+}) {
   const draftIds = shifts.filter((s) => !s.publishedAt).map((s) => s.id);
   const [isPending, startTransition] = useTransition();
+  const [view, setView] = useState<"list" | "calendar">("list");
+
+  const byDay = new Map<string, ShiftRow[]>();
+  for (const s of shifts) {
+    const key = toShopDateKey(s.startAt);
+    (byDay.get(key) ?? byDay.set(key, []).get(key)!).push(s);
+  }
+  const dayKeys = listShopDateKeysInRange(from, to);
 
   return (
     <div className="space-y-4">
       <AddShiftForm employees={employees} />
 
-      {draftIds.length > 0 && (
-        <button
-          disabled={isPending}
-          onClick={() => startTransition(async () => { await publishShifts(draftIds); })}
-          className="focus-ring rounded-lg bg-ink px-4 py-2 text-sm text-cream disabled:opacity-40"
-        >
-          Publish all {draftIds.length} draft shift{draftIds.length === 1 ? "" : "s"} in this range
-        </button>
-      )}
-
-      <div className="overflow-hidden rounded-xl border border-linen bg-white">
-        {shifts.length === 0 ? (
-          <p className="px-4 py-4 text-sm text-charcoal/60">No shifts scheduled in this range yet.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {draftIds.length > 0 ? (
+          <button
+            disabled={isPending}
+            onClick={() => startTransition(async () => { await publishShifts(draftIds); })}
+            className="focus-ring rounded-lg bg-ink px-4 py-2 text-sm text-cream disabled:opacity-40"
+          >
+            Publish all {draftIds.length} draft shift{draftIds.length === 1 ? "" : "s"} in this range
+          </button>
         ) : (
-          shifts.map((s) => <ShiftRowItem key={s.id} shift={s} />)
+          <span />
         )}
+
+        <div className="flex gap-1 rounded-full border border-linen bg-white p-1 text-sm">
+          <button
+            onClick={() => setView("list")}
+            className={`rounded-full px-3 py-1 ${view === "list" ? "bg-thread text-cream" : "text-charcoal/60 hover:text-ink"}`}
+          >
+            List
+          </button>
+          <button
+            onClick={() => setView("calendar")}
+            className={`rounded-full px-3 py-1 ${view === "calendar" ? "bg-thread text-cream" : "text-charcoal/60 hover:text-ink"}`}
+          >
+            Calendar
+          </button>
+        </div>
       </div>
+
+      {view === "list" ? (
+        <div className="overflow-hidden rounded-xl border border-linen bg-white">
+          {shifts.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-charcoal/60">No shifts scheduled in this range yet.</p>
+          ) : (
+            shifts.map((s) => <ShiftRowItem key={s.id} shift={s} />)
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-7">
+          {dayKeys.map((key) => {
+            const dayShifts = byDay.get(key) ?? [];
+            return (
+              <div key={key} className="overflow-hidden rounded-xl border border-linen bg-white">
+                <div className="border-b border-linen bg-cream px-2 py-1.5 text-center text-xs font-medium text-charcoal/70">
+                  {dayHeaderLabel(key)}
+                </div>
+                {dayShifts.length === 0 ? (
+                  <p className="px-2 py-3 text-center text-[11px] text-charcoal/40">—</p>
+                ) : (
+                  dayShifts.map((s) => <ShiftRowItem key={s.id} shift={s} />)
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

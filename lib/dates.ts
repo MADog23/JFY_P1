@@ -177,3 +177,24 @@ export function resolveWeekRange(from?: string, to?: string): { from: Date; to: 
   const now = new Date();
   return { from: startOfWeek(now), to: endOfWeek(now) };
 }
+
+/** Every YYYY-MM-DD (shop-zone) calendar date from `from` through `to`, inclusive — used
+ * to lay out a calendar view's day columns, one per date, even for a day with no shifts.
+ * Walks day-by-day using calendar arithmetic (not fixed-ms steps) so it's unaffected by
+ * the one or two DST transitions a year can fall inside the range. Capped at ~13 months
+ * as a safety net against a malformed range, not a real limit on how far this is used. */
+export function listShopDateKeysInRange(from: Date | string, to: Date | string): string[] {
+  const toKey = toDateInputValue(new Date(to));
+  const keys: string[] = [toDateInputValue(new Date(from))];
+  let cursor = shopDayStart(keys[0]);
+  let guard = 0;
+  while (keys[keys.length - 1] < toKey && guard < 400) {
+    const p = getZonedParts(cursor, SHOP_TIME_ZONE);
+    const next = addCalendarDays(p.year, p.month, p.day, 1);
+    const nextKey = `${next.year}-${pad(next.month)}-${pad(next.day)}`;
+    keys.push(nextKey);
+    cursor = shopDayStart(nextKey);
+    guard++;
+  }
+  return keys;
+}

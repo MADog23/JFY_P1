@@ -18,6 +18,7 @@ export function TopNav({
     ? [
         { href: `${base}/timeclock`, label: "Timeclock" },
         { href: `${base}/schedule`, label: "Schedule" },
+        { href: `${base}/time-off`, label: "Time off" },
       ]
     : [];
   // Analytics stays a top-level link next to Timeclock/Schedule — checked often enough

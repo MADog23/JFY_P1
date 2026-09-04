@@ -277,13 +277,37 @@ export function formatMinutesAsHours(minutes: number): string {
  * recent punches (today plus a little lookback for an overnight shift in progress). */
 export type CurrentPunchState = "CLOCKED_OUT" | "CLOCKED_IN" | "ON_BREAK" | "ON_LUNCH";
 
-export function currentPunchState(recentPunches: PunchLike[]): CurrentPunchState {
+/**
+ * Display-only expected durations for the "Break"/"Lunch" buttons (see ClockPad) — NOT
+ * enforced anywhere in the hours math above (that file-header comment still holds: this
+ * app deliberately doesn't enforce any particular break/lunch length or count). These
+ * only drive the button copy and the on-screen timer's countdown target; a break or
+ * lunch that runs long is still fully counted/subtracted exactly as before, just shown
+ * in a warning color past this point.
+ */
+export const EXPECTED_BREAK_MINUTES = 10;
+export const EXPECTED_LUNCH_MINUTES = 30;
+
+export type CurrentPunchDetail = {
+  state: CurrentPunchState;
+  /** When the current break/lunch started — null unless state is ON_BREAK/ON_LUNCH.
+   * Lets a client-side timer show real elapsed time (and survive a page refresh)
+   * instead of only knowing "you're on break" with no start point. */
+  startedAt: Date | null;
+};
+
+export function currentPunchDetail(recentPunches: PunchLike[]): CurrentPunchDetail {
   const sessions = pairPunchesIntoSessions(recentPunches);
   const last = sessions[sessions.length - 1];
-  if (!last || last.clockOut !== null) return "CLOCKED_OUT";
+  if (!last || last.clockOut !== null) return { state: "CLOCKED_OUT", startedAt: null };
   const lastBreak = last.breaks[last.breaks.length - 1];
-  if (lastBreak && lastBreak.end === null) return "ON_BREAK";
+  if (lastBreak && lastBreak.end === null) return { state: "ON_BREAK", startedAt: lastBreak.start };
   const lastLunch = last.lunches[last.lunches.length - 1];
-  if (lastLunch && lastLunch.end === null) return "ON_LUNCH";
-  return "CLOCKED_IN";
+  if (lastLunch && lastLunch.end === null) return { state: "ON_LUNCH", startedAt: lastLunch.start };
+  return { state: "CLOCKED_IN", startedAt: null };
+}
+
+/** Thin wrapper over currentPunchDetail for call sites that only need the state. */
+export function currentPunchState(recentPunches: PunchLike[]): CurrentPunchState {
+  return currentPunchDetail(recentPunches).state;
 }

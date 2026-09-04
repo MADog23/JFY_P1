@@ -89,6 +89,10 @@ model User {
   shiftsAssigned  Shift[]  @relation("ShiftAssignee")
   shiftsCreated   Shift[]  @relation("ShiftCreatedBy")
   shiftsCancelled Shift[]  @relation("ShiftCancelledBy")
+
+  timeOffRequests        TimeOffRequest[] @relation("TimeOffRequester")
+  timeOffRequestsCreated TimeOffRequest[] @relation("TimeOffCreatedBy")
+  timeOffRequestsDecided TimeOffRequest[] @relation("TimeOffDecidedBy")
 }
 
 model Order {
@@ -452,4 +456,58 @@ model Shift {
 
   @@index([userId, startAt])
   @@index([startAt])
+}
+
+enum TimeOffType {
+  PAID
+  UNPAID
+}
+
+enum TimeOffStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+// Phase 2 (timeclock + scheduling) — gated behind PHASE2_ENABLED, same as Punch/Shift
+// above. An employee requests a range of calendar days off, tagged paid or unpaid; a
+// manager approves or denies it. Nothing is ever deleted, only moved through `status` —
+// same soft-state philosophy as Order.CANCELLED / Shift.cancelledAt.
+model TimeOffRequest {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation("TimeOffRequester", fields: [userId], references: [id])
+
+  // Whole calendar days, stored as shop-local day-start/day-end instants (see
+  // lib/dates.ts's shopDayStart/shopDayEnd) — same convention as every other plain
+  // date-range field in this app.
+  startDate DateTime
+  endDate   DateTime
+
+  type   TimeOffType
+  reason String? // optional free text from whoever requested it
+
+  status TimeOffStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+
+  // Who actually created this row — the requester themselves for a normal self-service
+  // request, or a manager for one logged on an employee's behalf (see
+  // actions/time-off.ts:createTimeOffOnBehalf). Same split as Punch's userId/createdById:
+  // userId alone can't tell "self-requested" from "a manager entered this for them" apart.
+  createdById String
+  createdBy   User    @relation("TimeOffCreatedBy", fields: [createdById], references: [id])
+
+  // Null while PENDING. Set when a manager decides it (APPROVED/DENIED) — or immediately,
+  // to APPROVED, when a manager logs a request on an employee's behalf, since the manager
+  // IS the decision-maker in that act, with no separate pending step to skip through.
+  decidedById  String?
+  decidedBy    User?     @relation("TimeOffDecidedBy", fields: [decidedById], references: [id])
+  decidedAt    DateTime?
+  decisionNote String?
+
+  @@index([userId, startDate])
+  @@index([status])
 }

@@ -16,7 +16,7 @@ import { startOfWeek, endOfWeek, toDateInputValue } from "@/lib/dates";
 export default async function EmployeeTimeclockPage() {
   if (!isPhase2Enabled()) redirect("/employee");
   const session = await requireSession();
-  const { state } = await getMyPunchState();
+  const { state, startedAt } = await getMyPunchState();
 
   const now = new Date();
   const from = startOfWeek(now);
@@ -31,7 +31,7 @@ export default async function EmployeeTimeclockPage() {
         <h1 className="font-display text-2xl text-ink">Timeclock</h1>
         <p className="mb-6 text-sm text-charcoal/60">Clock in and out here — this is what replaces Homebase's timeclock.</p>
 
-        <ClockPad initialState={state} />
+        <ClockPad initialState={state} initialStartedAt={startedAt} />
 
         <div className="mt-6">
           <h2 className="mb-2 text-sm font-medium text-ink">This week</h2>

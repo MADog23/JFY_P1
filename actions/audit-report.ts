@@ -20,7 +20,7 @@ import { grantIpReveal, getIpRevealStatus } from "@/lib/audit-ip-reveal";
 // category label list (used by both the client-side filter dropdown and the
 // server-rendered table) lives in lib/audit-categories.ts instead and is imported by
 // both, rather than from here. This file only exports the type.
-export type AuditCategory = "ALL" | "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY" | "PUNCH" | "SHIFT" | "SECURITY";
+export type AuditCategory = "ALL" | "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY" | "PUNCH" | "SHIFT" | "TIME_OFF" | "SECURITY";
 
 // "Security" isn't a real entityType — it's a curated list of actions that cuts across
 // entityType (everything here happens to be tagged EMPLOYEE today, since logins and

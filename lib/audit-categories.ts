@@ -15,6 +15,7 @@ export const AUDIT_CATEGORY_OPTIONS: { value: AuditCategory; label: string }[] =
   { value: "TAXONOMY", label: "Garment options" },
   { value: "PUNCH", label: "Timeclock" },
   { value: "SHIFT", label: "Schedule" },
+  { value: "TIME_OFF", label: "Time off" },
   { value: "SECURITY", label: "Security" },
 ];
 

@@ -20,6 +20,7 @@ import {
   type PunchType,
   summarizePunchesByDay,
   currentPunchState,
+  currentPunchDetail,
   type CurrentPunchState,
   type DaySummary,
 } from "@/lib/hours";
@@ -50,11 +51,16 @@ async function getPunchStateForUserId(userId: string): Promise<CurrentPunchState
   return currentPunchState(punches);
 }
 
-/** What the clock button should show right now for the signed-in user. */
-export async function getMyPunchState(): Promise<{ state: CurrentPunchState; asOf: Date }> {
+/** What the clock button should show right now for the signed-in user, plus (when
+ * currently on a break/lunch) the timestamp it started — the ClockPad timer uses this
+ * to show real elapsed time and to survive a page refresh mid-break. */
+export async function getMyPunchState(): Promise<{ state: CurrentPunchState; startedAt: Date | null; asOf: Date }> {
   const session = await requireSession();
-  const state = await getPunchStateForUserId(session.userId);
-  return { state, asOf: new Date() };
+  const now = new Date();
+  const from = new Date(now.getTime() - CURRENT_STATE_LOOKBACK_HOURS * 60 * 60 * 1000);
+  const punches = await getActivePunchesForUser(session.userId, from, now);
+  const { state, startedAt } = currentPunchDetail(punches);
+  return { state, startedAt, asOf: now };
 }
 
 async function recordPunch(userId: string, createdById: string, type: PunchType): Promise<ActionResult> {

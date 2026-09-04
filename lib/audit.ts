@@ -4,8 +4,9 @@ import type { Prisma } from "@prisma/client";
 
 type AuditInput = {
   orderId?: string | null;
-  // PUNCH/SHIFT are Phase 2 (timeclock + scheduling) — see phase2/PLAN.md.
-  entityType: "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY" | "PUNCH" | "SHIFT";
+  // PUNCH/SHIFT/TIME_OFF are Phase 2 (timeclock + scheduling + vacation requests) —
+  // see phase2/PLAN.md.
+  entityType: "ORDER" | "ORDER_ITEM" | "EMPLOYEE" | "TAXONOMY" | "PUNCH" | "SHIFT" | "TIME_OFF";
   entityId: string;
   action: string;
   summary: string;

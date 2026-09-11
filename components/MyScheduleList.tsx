@@ -2,7 +2,8 @@
 
 /**
  * Employee-facing "my schedule" view. Read-only by design: publishing/editing lives
- * entirely in ScheduleBuilder (manager-only). A client component now only because of the
+ * entirely in the manager scheduler (components/scheduler/, manager-only). A client
+ * component now only because of the
  * List/Calendar toggle below — the shift data itself still comes straight from the server
  * page as props, nothing is fetched here.
  */

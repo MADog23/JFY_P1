@@ -14,7 +14,7 @@ import { shopDateTimeLocalSchema, shopDayStart, shopDayEnd } from "@/lib/dates";
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 // startAt/endAt arrive as raw `datetime-local` strings (e.g. "2026-09-02T19:06") — see
-// components/ScheduleBuilder.tsx. shopDateTimeLocalSchema always interprets that as a
+// the manager scheduler's daily Gantt/quick-add (components/scheduler/). shopDateTimeLocalSchema always interprets that as a
 // wall-clock time in the shop's own timezone (lib/dates.ts's SHOP_TIME_ZONE), regardless
 // of what timezone the manager's own device happens to be set to. Using z.coerce.date()
 // here instead would parse the string using the SERVER's ambient timezone, which is how

@@ -153,6 +153,16 @@ export function formatShopDateTime(d: Date | string, options: Intl.DateTimeForma
   return new Date(d).toLocaleString([], { ...options, timeZone: SHOP_TIME_ZONE });
 }
 
+/** Adds `days` calendar days to a YYYY-MM-DD date key — pure calendar arithmetic (see
+ * addCalendarDays above), unaffected by DST since it never represents a real instant.
+ * Use this instead of ms-based Date arithmetic (`+ days * 86400000`) on any shop-local
+ * date key — that approach can land on the wrong date across a DST transition. */
+export function addShopDays(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const next = addCalendarDays(y, m, d, days);
+  return `${next.year}-${pad(next.month)}-${pad(next.day)}`;
+}
+
 export function startOfWeek(d: Date): Date {
   const p = getZonedParts(d, SHOP_TIME_ZONE);
   const dowProbe = new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay(); // 0 = Sunday

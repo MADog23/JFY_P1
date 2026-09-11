@@ -178,6 +178,37 @@ export function endOfWeek(d: Date): Date {
   return zonedWallClockToUtc({ ...end, hour: 23, minute: 59, second: 59 }, SHOP_TIME_ZONE);
 }
 
+/** First/last instant of the calendar month `d` falls in, in SHOP_TIME_ZONE — the month
+ * equivalent of startOfWeek/endOfWeek above, used to lay out a month-grid calendar view. */
+export function startOfMonth(d: Date): Date {
+  const p = getZonedParts(d, SHOP_TIME_ZONE);
+  return zonedWallClockToUtc({ year: p.year, month: p.month, day: 1, hour: 0, minute: 0, second: 0 }, SHOP_TIME_ZONE);
+}
+export function endOfMonth(d: Date): Date {
+  const p = getZonedParts(d, SHOP_TIME_ZONE);
+  // Date.UTC's month arg is 0-indexed, so passing p.month (1-indexed) here means "the
+  // month after p.month, day 0" — i.e. the last day of p.month itself.
+  const lastDay = new Date(Date.UTC(p.year, p.month, 0)).getUTCDate();
+  return zonedWallClockToUtc({ year: p.year, month: p.month, day: lastDay, hour: 23, minute: 59, second: 59 }, SHOP_TIME_ZONE);
+}
+
+/** YYYY-MM for the calendar month `d` falls in, in SHOP_TIME_ZONE — the anchor value a
+ * month-grid calendar's own URL param (?month=) is stored as. */
+export function toMonthInputValue(d: Date): string {
+  const p = getZonedParts(d, SHOP_TIME_ZONE);
+  return `${p.year}-${pad(p.month)}`;
+}
+
+/** Adds `months` calendar months to a YYYY-MM month key, clamped to day 1 throughout so
+ * there's no day-31-rolling-into-the-wrong-month issue. */
+export function addMonths(monthKey: string, months: number): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const total = (y * 12 + (m - 1)) + months;
+  const year = Math.floor(total / 12);
+  const month = (total % 12) + 1;
+  return `${year}-${pad(month)}`;
+}
+
 /** Resolves optional from/to searchParams (YYYY-MM-DD) into a Monday–Sunday range
  * covering today's week (in SHOP_TIME_ZONE) if neither is provided. */
 export function resolveWeekRange(from?: string, to?: string): { from: Date; to: Date } {

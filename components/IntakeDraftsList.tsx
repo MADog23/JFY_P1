@@ -23,17 +23,21 @@ export function IntakeDraftsList({ drafts, activeDraftId }: { drafts: IntakeDraf
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-charcoal/50">
         Open drafts ({drafts.length})
       </p>
-      <ul className="space-y-1.5">
+      <ul className="divide-y divide-linen/60">
         {drafts.map((d) => (
-          <li key={d.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
+          <li key={d.id} className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <div className="min-w-0">
+              {/* block (not inline) so the tap target is the link's full line rather
+                  than just the width of its text — on a phone, the old inline layout put
+                  this close enough to the meta text and Discard button that it was hard
+                  or impossible to tap accurately. */}
               <Link
                 href={`/employee/new?draft=${d.id}`}
-                className={`font-medium hover:underline ${d.id === activeDraftId ? "text-ink" : "text-thread"}`}
+                className={`block py-1 font-medium hover:underline ${d.id === activeDraftId ? "text-ink" : "text-thread"}`}
               >
                 {d.clientName || "Unnamed draft"}
               </Link>
-              <span className="ml-2 text-xs text-charcoal/40">
+              <span className="block text-xs text-charcoal/40">
                 {d.itemCount} item{d.itemCount === 1 ? "" : "s"}
                 {d.isRush ? " · rush" : ""} · started by {d.createdByName}
                 {d.updatedByName && d.updatedByName !== d.createdByName ? `, last saved by ${d.updatedByName}` : ""} · {d.updatedAtLabel}
@@ -49,7 +53,7 @@ export function IntakeDraftsList({ drafts, activeDraftId }: { drafts: IntakeDraf
                   window.location.href = "/employee/new";
                 });
               }}
-              className="focus-ring shrink-0 rounded px-2 py-1 text-xs text-alert hover:underline disabled:opacity-40"
+              className="focus-ring self-start rounded px-2 py-1 text-xs text-alert hover:underline disabled:opacity-40 sm:shrink-0"
             >
               Discard
             </button>

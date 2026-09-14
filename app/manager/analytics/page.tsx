@@ -1,21 +1,28 @@
 import Link from "next/link";
-import { requireManager } from "@/lib/auth";
 import { getAnalytics } from "@/actions/analytics";
 import { formatCents } from "@/lib/money";
-import { TopNav } from "@/components/TopNav";
+import { AnalyticsRangeFilters } from "@/components/analytics/AnalyticsRangeFilters";
 
-export default async function AnalyticsPage() {
-  const session = await requireManager();
-  const stats = await getAnalytics();
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+export default async function AnalyticsPage({ searchParams }: { searchParams: { from?: string; to?: string } }) {
+  const from = searchParams.from && DATE_ONLY.test(searchParams.from) ? searchParams.from : undefined;
+  const to = searchParams.to && DATE_ONLY.test(searchParams.to) ? searchParams.to : undefined;
+  const hasRange = !!(from && to);
+  const stats = await getAnalytics(from, to);
 
   return (
     <>
-      <TopNav name={session.name} role={session.role} />
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <h1 className="mb-1 font-display text-2xl text-ink">Shop analytics</h1>
-        <p className="mb-6 text-sm text-charcoal/60">A quick pulse on where the shop stands right now.</p>
+      <div className="mb-6">
+        <h2 className="font-display text-lg text-ink">Overview</h2>
+        <p className="text-xs text-charcoal/50">
+          {hasRange ? `A pulse on the shop for ${from} through ${to}.` : "A quick pulse on where the shop stands right now."}
+        </p>
+      </div>
 
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <AnalyticsRangeFilters from={from} to={to} />
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
           <StatCard label="Total orders ever" value={stats.totalOrders} />
           <StatCard
             label="Overdue &amp; still in progress"
@@ -125,7 +132,6 @@ export default async function AnalyticsPage() {
             labels={{ UNPAID: "Unpaid", DEPOSIT_PAID: "Deposit paid", PAID: "Paid" }}
           />
         </div>
-      </main>
     </>
   );
 }
@@ -201,7 +207,7 @@ function NeedsPricingCard({
   orders,
   totalGaps,
 }: {
-  orders: { id: string; orderNumber: string; clientName: string; gaps: number }[];
+  orders: { id: string; orderNumber: string; clientName: string; gaps: number; items: { garmentType: string; unpricedAlterations: string[] }[] }[];
   totalGaps: number;
 }) {
   return (
@@ -216,15 +222,18 @@ function NeedsPricingCard({
       {orders.length === 0 ? (
         <p className="text-sm text-charcoal/40">Every open ticket is fully priced.</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="space-y-2.5">
           {orders.slice(0, 6).map((o) => (
-            <li key={o.id} className="flex items-center justify-between gap-3">
-              <Link href={`/manager/orders/${o.id}`} className="text-sm text-thread hover:underline">
-                {o.orderNumber} — {o.clientName}
-              </Link>
-              <span className="whitespace-nowrap text-xs text-charcoal/50">
-                {o.gaps} unpriced
-              </span>
+            <li key={o.id}>
+              <div className="flex items-center justify-between gap-3">
+                <Link href={`/manager/orders/${o.id}`} className="text-sm text-thread hover:underline">
+                  {o.orderNumber} — {o.clientName}
+                </Link>
+                <span className="whitespace-nowrap text-xs text-charcoal/50">{o.gaps} unpriced</span>
+              </div>
+              <p className="mt-0.5 text-xs text-charcoal/50">
+                {o.items.map((item) => `${item.garmentType}: ${item.unpricedAlterations.join(", ")}`).join(" · ")}
+              </p>
             </li>
           ))}
           {orders.length > 6 && <li className="text-xs text-charcoal/40">+{orders.length - 6} more orders</li>}

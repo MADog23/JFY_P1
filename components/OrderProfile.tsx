@@ -396,6 +396,8 @@ function GeneralNotesAndPayment({ order, role }: { order: any; role: "EMPLOYEE" 
  */
 function PricingPanel({ order }: { order: any }) {
   const orderLevelLines = (order.priceLines ?? []).filter((pl: any) => !pl.orderItemId);
+  const hasRushFeeLine = orderLevelLines.some((pl: any) => pl.description.trim().toLowerCase() === "rush fee");
+  const offerRushFee = !!order.isRush && !hasRushFeeLine;
 
   return (
     <section className="rounded-2xl border border-linen bg-white p-6">
@@ -414,7 +416,21 @@ function PricingPanel({ order }: { order: any }) {
           ))}
         </div>
       )}
-      <AddPriceLineForm orderId={order.id} orderItemId={null} placeholder="Add an order-wide charge…" />
+      {offerRushFee && (
+        <p className="mb-2 text-xs text-brass">
+          This is a rush order — the field below is pre-filled to add its rush fee.
+        </p>
+      )}
+      <AddPriceLineForm
+        // Forces a fresh mount (and so a fresh initialDescription) whenever whether to
+        // offer the rush-fee pre-fill changes, e.g. right after this order's rush flag
+        // was toggled or a rush fee line was just added/removed.
+        key={offerRushFee ? "rush" : "normal"}
+        orderId={order.id}
+        orderItemId={null}
+        placeholder="Add an order-wide charge…"
+        initialDescription={offerRushFee ? "Rush fee" : ""}
+      />
     </section>
   );
 }

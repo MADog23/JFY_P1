@@ -110,12 +110,17 @@ export function AddPriceLineForm({
   orderId,
   orderItemId,
   placeholder = "Add a price line…",
+  initialDescription = "",
 }: {
   orderId: string;
   orderItemId: string | null;
   placeholder?: string;
+  /** Pre-fills the description field (e.g. "Rush fee" when the order is flagged rush
+   * and doesn't have one yet) so whoever's pricing just has to fill in the amount,
+   * instead of also having to remember and type the label by hand. */
+  initialDescription?: string;
 }) {
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(initialDescription);
   const [amount, setAmount] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

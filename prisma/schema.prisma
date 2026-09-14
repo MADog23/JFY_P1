@@ -93,6 +93,12 @@ model User {
   timeOffRequests        TimeOffRequest[] @relation("TimeOffRequester")
   timeOffRequestsCreated TimeOffRequest[] @relation("TimeOffCreatedBy")
   timeOffRequestsDecided TimeOffRequest[] @relation("TimeOffDecidedBy")
+
+  // Autosaved, not-yet-submitted intake tickets — see IntakeDraft below. createdBy is
+  // whoever started the draft; updatedBy is whoever most recently autosaved it, which
+  // can be a different person (any active employee/manager can pick up an open draft).
+  intakeDraftsCreated IntakeDraft[] @relation("IntakeDraftCreatedBy")
+  intakeDraftsUpdated IntakeDraft[] @relation("IntakeDraftUpdatedBy")
 }
 
 model Order {
@@ -305,6 +311,42 @@ model PriceLine {
 
   @@index([orderId])
   @@index([orderItemId])
+}
+
+// An intake ticket that's been started but not yet submitted through
+// createIntakeTicket — autosaved every few seconds from components/IntakeForm.tsx so
+// nobody loses a half-finished ticket to a closed tab, a crashed browser, or a device
+// swap. Deliberately its own lightweight table rather than an Order in some "DRAFT"
+// status: a real Order carries an orderNumber, client-facing tracking token, and shows
+// up in every status count / analytics query in the app the instant it exists — none of
+// that should be true yet for something that might get abandoned or rewritten five
+// times before anyone finalizes it. A draft only ever becomes a real Order (and is
+// deleted) via createIntakeTicket's normal, fully-validated path; nothing here bypasses
+// that.
+model IntakeDraft {
+  id String @id @default(cuid())
+
+  // The entire client-side intake form (client/pickup fields, items, alterations, draft
+  // price lines, isRush, which step they were on) as one JSON blob. Kept schema-free on
+  // purpose — it mirrors whatever shape components/IntakeForm.tsx's in-memory state
+  // happens to be, so a form field changing later doesn't also require a migration
+  // here. Nothing outside the draft save/resume/discard actions ever reads this, and a
+  // malformed draft can only ever break loading that ONE draft back into the form — it
+  // has no path to affecting a real Order, price line, or any analytics.
+  formState Json
+
+  // Whoever started the draft, and whoever most recently autosaved it — not always the
+  // same person, since any active employee/manager can see and resume an open draft
+  // (e.g. if whoever started it stepped away or logged out for the day).
+  createdById String
+  createdBy   User   @relation("IntakeDraftCreatedBy", fields: [createdById], references: [id])
+  updatedById String?
+  updatedBy   User?  @relation("IntakeDraftUpdatedBy", fields: [updatedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
 }
 
 // The accountability trail: every mutation across the system writes one of these.

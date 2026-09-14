@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { createIntakeTicket } from "@/actions/orders";
+import { saveIntakeDraft, discardIntakeDraft } from "@/actions/intake-drafts";
 import { parseDollarsToCents, formatCents } from "@/lib/money";
 
 type PriceLineSource = "ALTERATION" | "CUSTOM_INSTRUCTIONS" | "FREEFORM";
@@ -81,25 +82,151 @@ function draftLinesToPayload(lines: PriceLineDraft[]) {
     .filter((pl): pl is { description: string; amountCents: number; source: PriceLineSource } => pl !== null);
 }
 
+// --- Autosaved-draft support --------------------------------------------------------
+// The shape components/IntakeForm.tsx's own state gets serialized to/from when
+// autosaving to (and resuming from) an IntakeDraft row — see actions/intake-drafts.ts.
+// Read back defensively (asString/asBool/asItems/asPriceLines below) since the draft is
+// stored schema-free on the server and this is the only place that interprets it.
+
+type IntakeDraftFormState = {
+  step: 1 | 2;
+  clientName: string;
+  clientPhone: string;
+  clientEmail: string;
+  pickupContactName: string;
+  pickupContactPhone: string;
+  dueDate: string;
+  isRush: boolean;
+  items: ItemDraft[];
+  orderPriceLines: PriceLineDraft[];
+};
+
+function asString(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function asBool(v: unknown): boolean {
+  return v === true;
+}
+
+function asPriceLineDrafts(v: unknown): PriceLineDraft[] {
+  if (!Array.isArray(v)) return [];
+  const sources: PriceLineSource[] = ["ALTERATION", "CUSTOM_INSTRUCTIONS", "FREEFORM"];
+  return v
+    .filter((pl): pl is Record<string, unknown> => !!pl && typeof pl === "object")
+    .map((pl) => ({
+      key: asString(pl.key) || freeformKey(),
+      description: asString(pl.description),
+      amount: asString(pl.amount),
+      source: sources.includes(pl.source as PriceLineSource) ? (pl.source as PriceLineSource) : "FREEFORM",
+    }));
+}
+
+function asItemDrafts(v: unknown): ItemDraft[] {
+  if (!Array.isArray(v) || v.length === 0) return [emptyItem()];
+  return v
+    .filter((it): it is Record<string, unknown> => !!it && typeof it === "object")
+    .map((it) => ({
+      garmentType: asString(it.garmentType),
+      description: asString(it.description),
+      alterations: Array.isArray(it.alterations) ? it.alterations.filter((a): a is string => typeof a === "string") : [],
+      alterationsCustom: asString(it.alterationsCustom),
+      priceLines: asPriceLineDrafts(it.priceLines),
+    }));
+}
+
 export default function IntakeForm({
   garmentTypes,
   alterationTypes,
+  initialDraft,
 }: {
   garmentTypes: string[];
   alterationTypes: string[];
+  /** Loads a previously autosaved, not-yet-submitted ticket back into the form — see the
+   * "Resume a draft" list on the new-intake page (app/employee/new/page.tsx). */
+  initialDraft?: { id: string; formState: unknown } | null;
 }) {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [clientName, setClientName] = useState("");
-  const [clientPhone, setClientPhone] = useState("");
-  const [clientEmail, setClientEmail] = useState("");
-  const [pickupContactName, setPickupContactName] = useState("");
-  const [pickupContactPhone, setPickupContactPhone] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [isRush, setIsRush] = useState(false);
-  const [items, setItems] = useState<ItemDraft[]>([emptyItem()]);
-  const [orderPriceLines, setOrderPriceLines] = useState<PriceLineDraft[]>([]);
+  const draftState =
+    initialDraft?.formState && typeof initialDraft.formState === "object"
+      ? (initialDraft.formState as Record<string, unknown>)
+      : null;
+
+  const [step, setStep] = useState<1 | 2>(draftState?.step === 2 ? 2 : 1);
+  const [clientName, setClientName] = useState(asString(draftState?.clientName));
+  const [clientPhone, setClientPhone] = useState(asString(draftState?.clientPhone));
+  const [clientEmail, setClientEmail] = useState(asString(draftState?.clientEmail));
+  const [pickupContactName, setPickupContactName] = useState(asString(draftState?.pickupContactName));
+  const [pickupContactPhone, setPickupContactPhone] = useState(asString(draftState?.pickupContactPhone));
+  const [dueDate, setDueDate] = useState(asString(draftState?.dueDate));
+  const [isRush, setIsRush] = useState(asBool(draftState?.isRush));
+  const [items, setItems] = useState<ItemDraft[]>(asItemDrafts(draftState?.items));
+  const [orderPriceLines, setOrderPriceLines] = useState<PriceLineDraft[]>(asPriceLineDrafts(draftState?.orderPriceLines));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Autosave — see actions/intake-drafts.ts. draftId starts as initialDraft's id when
+  // resuming one; otherwise the first successful autosave assigns it. draftIdRef mirrors
+  // draftId for the debounced save below, so a save started before the id was known (or
+  // before a later save updated it) always targets the current row instead of creating
+  // a duplicate.
+  const [draftId, setDraftId] = useState<string | null>(initialDraft?.id ?? null);
+  const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">(initialDraft ? "saved" : "idle");
+  const draftIdRef = useRef(draftId);
+  const [, startDraftSave] = useTransition();
+
+  useEffect(() => {
+    draftIdRef.current = draftId;
+  }, [draftId]);
+
+  useEffect(() => {
+    // An untouched blank form (or one that's been cleared back to blank) has nothing
+    // worth saving — don't create a draft row just because the page was opened.
+    const hasContent =
+      clientName.trim() !== "" ||
+      clientPhone.trim() !== "" ||
+      items.some((it) => it.garmentType || it.description.trim() || it.alterations.length > 0 || it.alterationsCustom.trim());
+    if (!hasContent) return;
+
+    const formState: IntakeDraftFormState = {
+      step,
+      clientName,
+      clientPhone,
+      clientEmail,
+      pickupContactName,
+      pickupContactPhone,
+      dueDate,
+      isRush,
+      items,
+      orderPriceLines,
+    };
+
+    setDraftStatus("saving");
+    const timer = setTimeout(() => {
+      startDraftSave(async () => {
+        const result = await saveIntakeDraft(draftIdRef.current, formState);
+        if (result.ok) {
+          if (result.id !== draftIdRef.current) setDraftId(result.id);
+          setDraftStatus("saved");
+        } else {
+          setDraftStatus("idle");
+        }
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+    // Deliberately omits startDraftSave (stable from useTransition) from deps — this
+    // should re-run whenever the form content itself changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, clientName, clientPhone, clientEmail, pickupContactName, pickupContactPhone, dueDate, isRush, items, orderPriceLines]);
+
+  function discardDraft() {
+    if (!draftId) return;
+    if (!confirm("Discard this draft? This can't be undone.")) return;
+    startDraftSave(async () => {
+      await discardIntakeDraft(draftId);
+      window.location.href = "/employee/new";
+    });
+  }
 
   function updateItem(index: number, patch: Partial<ItemDraft>) {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
@@ -129,6 +256,19 @@ export default function IntakeForm({
     }
     setError(null);
     setItems((prev) => prev.map((it) => ({ ...it, priceLines: syncItemPriceLines(it) })));
+    // Rush order is checked → make sure there's already a place to fill in the rush fee
+    // on the pricing step, instead of making whoever's pricing remember to add one by
+    // hand and type "Rush fee" themselves. Only adds it once (checked by description,
+    // not by key) — going back and forth between steps won't create duplicates, and
+    // unchecking rush afterward doesn't remove a row already added, in case an amount
+    // was already typed into it.
+    if (isRush) {
+      setOrderPriceLines((prev) =>
+        prev.some((pl) => pl.description.trim().toLowerCase() === "rush fee")
+          ? prev
+          : [...prev, { key: "rush-fee", description: "Rush fee", amount: "", source: "FREEFORM" }]
+      );
+    }
     setStep(2);
   }
 
@@ -151,6 +291,7 @@ export default function IntakeForm({
           priceLines: draftLinesToPayload(it.priceLines),
         })),
         orderPriceLines: draftLinesToPayload(orderPriceLines),
+        draftId: draftId ?? undefined,
       });
       if (result && !result.ok) setError(result.error);
     });
@@ -174,6 +315,8 @@ export default function IntakeForm({
         isPending={isPending}
         onBack={() => setStep(1)}
         onSubmit={submit}
+        draftStatus={draftStatus}
+        onDiscardDraft={draftId ? discardDraft : null}
       />
     );
   }
@@ -189,6 +332,8 @@ export default function IntakeForm({
       {error && (
         <p className="rounded-lg border border-alert/30 bg-alert/10 px-4 py-2 text-sm text-alert">{error}</p>
       )}
+
+      <DraftStatusBar status={draftStatus} onDiscard={draftId ? discardDraft : null} />
 
       <section className="rounded-2xl border border-linen bg-white p-6">
         <h2 className="mb-4 font-display text-lg text-ink">Client &amp; pickup contact</h2>
@@ -336,6 +481,8 @@ function PricingStep({
   isPending,
   onBack,
   onSubmit,
+  draftStatus,
+  onDiscardDraft,
 }: {
   items: ItemDraft[];
   setItems: React.Dispatch<React.SetStateAction<ItemDraft[]>>;
@@ -346,6 +493,8 @@ function PricingStep({
   isPending: boolean;
   onBack: () => void;
   onSubmit: () => void;
+  draftStatus: "idle" | "saving" | "saved";
+  onDiscardDraft: (() => void) | null;
 }) {
   function updateItemLine(itemIndex: number, lineKey: string, patch: Partial<PriceLineDraft>) {
     setItems((prev) =>
@@ -395,6 +544,8 @@ function PricingStep({
       {error && (
         <p className="rounded-lg border border-alert/30 bg-alert/10 px-4 py-2 text-sm text-alert">{error}</p>
       )}
+
+      <DraftStatusBar status={draftStatus} onDiscard={onDiscardDraft} />
 
       <div>
         <h2 className="font-display text-lg text-ink">Itemized pricing</h2>
@@ -487,6 +638,32 @@ function PricingStep({
         Prices left blank won't be saved — a manager can add them later. Once this ticket is created,
         the itemized breakdown is manager-only to view or edit; employees will still see the order total.
       </p>
+    </div>
+  );
+}
+
+/** Small status line shown while this ticket is still a draft — nothing renders once
+ * there's neither a save in flight nor an existing draft to discard (a fresh, untouched
+ * form). See the autosave effect and discardDraft() in IntakeForm above. */
+function DraftStatusBar({
+  status,
+  onDiscard,
+}: {
+  status: "idle" | "saving" | "saved";
+  onDiscard: (() => void) | null;
+}) {
+  if (status === "idle" && !onDiscard) return null;
+  return (
+    <div className="-mt-2 flex items-center justify-between text-xs text-charcoal/40">
+      <span>
+        {status === "saving" && "Saving draft…"}
+        {status === "saved" && "Draft saved — safe to step away and come back later."}
+      </span>
+      {onDiscard && (
+        <button type="button" onClick={onDiscard} className="text-alert hover:underline">
+          Discard this draft
+        </button>
+      )}
     </div>
   );
 }

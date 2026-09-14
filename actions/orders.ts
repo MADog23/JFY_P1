@@ -225,6 +225,10 @@ const intakeSchema = z.object({
   items: z.array(itemSchema).min(1, "Add at least one item to the order."),
   // Freeform charges not tied to any one item (e.g. a rush fee).
   orderPriceLines: z.array(priceLineDraftSchema).default([]),
+  // Set when this ticket started life as an autosaved IntakeDraft (see
+  // actions/intake-drafts.ts) — the draft is deleted below, in the same transaction, once
+  // the real order is successfully created from it.
+  draftId: z.string().optional(),
 });
 
 /** Employee OR manager: creates the intake ticket. Locked after this point except by a manager. */
@@ -317,6 +321,13 @@ export async function createIntakeTicket(
         },
         tx
       );
+    }
+
+    // The ticket is now a real order — the draft it started as (if any) is done its
+    // job. deleteMany rather than delete so this never throws if the draft is somehow
+    // already gone (e.g. someone else discarded it in another tab at the same moment).
+    if (data.draftId) {
+      await tx.intakeDraft.deleteMany({ where: { id: data.draftId } });
     }
 
     return created;

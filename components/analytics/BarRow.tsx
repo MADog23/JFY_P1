@@ -37,7 +37,11 @@ export function BarListCard({
 }: {
   title: string;
   subtitle?: string;
-  children: React.ReactNode;
+  // Optional because a caller with nothing to plot (see WeeklyBreakdownCard in
+  // app/manager/analytics/employees/page.tsx) passes only `empty` and no children at
+  // all — children is never read in that branch below, so this doesn't weaken anything
+  // for callers that do pass content.
+  children?: React.ReactNode;
   /** Shown instead of `children` when the caller has nothing to plot. */
   empty?: string;
 }) {

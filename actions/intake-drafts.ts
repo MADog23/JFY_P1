@@ -9,6 +9,7 @@
  * once the order is created.
  */
 
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { formatShopDateTime } from "@/lib/dates";
@@ -51,7 +52,12 @@ export async function listIntakeDrafts(): Promise<IntakeDraftSummary[]> {
   });
 
   return drafts.map((d) => {
-    const state = (d.formState ?? {}) as DraftFormStateSummary;
+    // Prisma types a Json column's read value as its own JsonValue union, not our loose
+    // DraftFormStateSummary shape — routed through `unknown` since the two types don't
+    // otherwise overlap enough for a direct assertion, matching how formState is read
+    // everywhere else (it's genuinely unknown/untrusted shape until checked field by
+    // field below).
+    const state = (d.formState ?? {}) as unknown as DraftFormStateSummary;
     const items = Array.isArray(state.items) ? state.items : [];
     return {
       id: d.id,
@@ -89,10 +95,17 @@ export async function saveIntakeDraft(
     return { ok: false, error: "Invalid draft." };
   }
 
+  // formState is `unknown` at this point (checked above to be a non-null object) —
+  // Prisma's Json write input wants its own InputJsonValue type, so this asserts
+  // straight to that rather than through a bare `object` (TypeScript can always assert
+  // an `unknown` value to a specific type directly; `object` on its own doesn't
+  // actually satisfy Prisma's stricter Json input type).
+  const jsonFormState = formState as Prisma.InputJsonValue;
+
   if (id) {
     const updated = await db.intakeDraft.updateMany({
       where: { id },
-      data: { formState: formState as object, updatedById: session.userId },
+      data: { formState: jsonFormState, updatedById: session.userId },
     });
     if (updated.count > 0) return { ok: true, id };
     // Fell through: the draft was discarded (by this person or someone else) since the
@@ -100,7 +113,7 @@ export async function saveIntakeDraft(
   }
 
   const created = await db.intakeDraft.create({
-    data: { formState: formState as object, createdById: session.userId, updatedById: session.userId },
+    data: { formState: jsonFormState, createdById: session.userId, updatedById: session.userId },
   });
   return { ok: true, id: created.id };
 }

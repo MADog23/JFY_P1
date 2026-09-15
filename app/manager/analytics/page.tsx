@@ -1,15 +1,49 @@
 import Link from "next/link";
-import { getAnalytics } from "@/actions/analytics";
+import { getAnalytics, getClientAnalytics, getAgingItems, getPeriodHeadlineStats } from "@/actions/analytics";
 import { formatCents } from "@/lib/money";
+import { shopDayStart, addShopDays } from "@/lib/dates";
 import { AnalyticsRangeFilters } from "@/components/analytics/AnalyticsRangeFilters";
+import { StatCard } from "@/components/analytics/StatCard";
+import { DeltaBadge } from "@/components/analytics/DeltaBadge";
+import { MonthlyTrendChart } from "@/components/analytics/MonthlyTrendChart";
+import { OrdinalBreakdownCard } from "@/components/analytics/OrdinalBreakdownCard";
+import { CategoricalCompositionCard } from "@/components/analytics/CategoricalCompositionCard";
+import { TopClientsCard } from "@/components/analytics/TopClientsCard";
+import { AgingItemsCard } from "@/components/analytics/AgingItemsCard";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The immediately-preceding period of equal length to [from, to] — the comparison
+ * window for the top KPI cards' "vs. previous period" delta. Plain shop-local calendar
+ * math (addShopDays), same convention as everywhere else a date-range param is handled. */
+function computePrevRange(from: string, to: string): { from: string; to: string } {
+  const spanDays = Math.round((shopDayStart(to).getTime() - shopDayStart(from).getTime()) / 86400000) + 1;
+  const prevTo = addShopDays(from, -1);
+  const prevFrom = addShopDays(prevTo, -(spanDays - 1));
+  return { from: prevFrom, to: prevTo };
+}
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: { from?: string; to?: string } }) {
   const from = searchParams.from && DATE_ONLY.test(searchParams.from) ? searchParams.from : undefined;
   const to = searchParams.to && DATE_ONLY.test(searchParams.to) ? searchParams.to : undefined;
   const hasRange = !!(from && to);
-  const stats = await getAnalytics(from, to);
+  const prevRange = hasRange ? computePrevRange(from!, to!) : null;
+
+  const [stats, clientStats, agingOrders, prevPeriod] = await Promise.all([
+    getAnalytics(from, to),
+    getClientAnalytics(from, to),
+    getAgingItems(),
+    prevRange ? getPeriodHeadlineStats(prevRange.from, prevRange.to) : Promise.resolve(null),
+  ]);
+
+  const monthlyTrendPoints = stats.monthlyTrend.map((m) => ({
+    month: m.month,
+    label: m.label,
+    valueCents: m.revenueCents,
+    meta: `${m.orderCount} order${m.orderCount === 1 ? "" : "s"}${
+      m.avgTurnaroundDays !== null ? ` · ${m.avgTurnaroundDays}d avg turnaround` : ""
+    }${m.cancelledCount > 0 ? ` · ${m.cancelledCount} cancelled` : ""}`,
+  }));
 
   return (
     <>
@@ -22,116 +56,147 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
 
       <AnalyticsRangeFilters from={from} to={to} />
 
+      {/* --- Headline KPIs, with a vs.-previous-period delta once a range is picked --- */}
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          <StatCard label="Total orders ever" value={stats.totalOrders} />
-          <StatCard
-            label="Overdue &amp; still in progress"
-            value={stats.overdueActiveOrders}
-            accent={stats.overdueActiveOrders > 0}
-          />
-          <StatCard
-            label="Avg. turnaround"
-            value={stats.avgTurnaroundDays !== null ? `${stats.avgTurnaroundDays} days` : "—"}
-          />
-        </div>
+        <StatCard
+          label="Total revenue (priced orders)"
+          value={formatCents(stats.totalRevenueCents)}
+          delta={prevPeriod ? <DeltaBadge current={stats.totalRevenueCents} previous={prevPeriod.totalRevenueCents} /> : undefined}
+        />
+        <StatCard
+          label="Avg. order value"
+          value={formatCents(stats.avgOrderValueCents)}
+          delta={prevPeriod ? <DeltaBadge current={stats.avgOrderValueCents} previous={prevPeriod.avgOrderValueCents} /> : undefined}
+        />
+        <StatCard
+          label="Avg. turnaround"
+          value={stats.avgTurnaroundDays !== null ? `${stats.avgTurnaroundDays} days` : "—"}
+          delta={
+            prevPeriod && stats.avgTurnaroundDays !== null ? (
+              <DeltaBadge current={stats.avgTurnaroundDays} previous={prevPeriod.avgTurnaroundDays ?? 0} higherIsBetter={false} />
+            ) : undefined
+          }
+        />
+      </div>
+      <p className="mb-6 -mt-3 text-xs text-charcoal/40">
+        Based on itemized pricing entered on each order. Orders with no pricing entered yet count as $0.
+        {prevPeriod ? " Deltas compare against the equivalent period immediately before the selected range." : ""}
+      </p>
 
-        <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <StatCard label="Total revenue (priced orders)" value={formatCents(stats.totalRevenueCents)} />
-          <StatCard label="Avg. order value" value={formatCents(stats.avgOrderValueCents)} />
-        </div>
-        <p className="mb-6 -mt-3 text-xs text-charcoal/40">
-          Based on itemized pricing entered on each order. Orders with no pricing entered yet count as $0.
+      {/* --- State of the shop right now: what needs a manager's attention today --- */}
+      <div className="mb-3">
+        <h2 className="font-display text-lg text-ink">Right now</h2>
+        <p className="text-xs text-charcoal/50">
+          A snapshot, not scoped to the date range above — what's on the floor today, regardless of when it came in.
         </p>
+      </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total orders ever" value={stats.totalOrders} />
+        <StatCard label="Overdue &amp; still in progress" value={stats.overdueActiveOrders} accent={stats.overdueActiveOrders > 0} />
+        <StatCard
+          label="Cancellation rate"
+          value={stats.cancellationRate.rate !== null ? `${stats.cancellationRate.rate}%` : "—"}
+          sublabel={`${stats.cancellationRate.cancelledCount}/${stats.cancellationRate.total} orders created${hasRange ? " in this range" : ""}`}
+          accent={!!stats.cancellationRate.rate && stats.cancellationRate.rate > 10}
+        />
+      </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+        <NeedsPricingCard orders={stats.needsPricing} totalGaps={stats.totalPricingGaps} />
+        <AgingItemsCard orders={agingOrders} />
+      </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <OrdinalBreakdownCard
+          title="Orders by status"
+          stages={[
+            { key: "IN_PROGRESS", label: "In progress", count: stats.orderStatusCounts.IN_PROGRESS ?? 0 },
+            { key: "SEALED", label: "Ready for pickup", count: stats.orderStatusCounts.SEALED ?? 0 },
+            { key: "PICKED_UP", label: "Fully picked up", count: stats.orderStatusCounts.PICKED_UP ?? 0 },
+          ]}
+        />
+        <OrdinalBreakdownCard
+          title="Items by status"
+          stages={[
+            { key: "PENDING", label: "Not started", count: stats.itemStatusCounts.PENDING ?? 0 },
+            { key: "IN_PROGRESS", label: "In progress", count: stats.itemStatusCounts.IN_PROGRESS ?? 0 },
+            { key: "COMPLETED", label: "Completed", count: stats.itemStatusCounts.COMPLETED ?? 0 },
+            { key: "PICKED_UP", label: "Picked up", count: stats.itemStatusCounts.PICKED_UP ?? 0 },
+          ]}
+        />
+        <OrdinalBreakdownCard
+          title="Orders by payment status"
+          stages={[
+            { key: "UNPAID", label: "Unpaid", count: stats.paymentCounts.UNPAID ?? 0 },
+            { key: "DEPOSIT_PAID", label: "Deposit paid", count: stats.paymentCounts.DEPOSIT_PAID ?? 0 },
+            { key: "PAID", label: "Paid", count: stats.paymentCounts.PAID ?? 0 },
+          ]}
+        />
+      </div>
 
-        <div className="mb-3">
-          <h2 className="font-display text-lg text-ink">Pricing insights</h2>
-          <p className="text-xs text-charcoal/50">
-            Built from the itemized price lines entered on each ticket — alteration and garment-type
-            breakdowns only cover standard pricing, since write-in charges don't have a consistent label
-            to group by.
-          </p>
-        </div>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <RevenueByLabelCard title="Revenue by alteration" rows={stats.revenueByAlteration} />
-          <RevenueByLabelCard title="Revenue by garment type" rows={stats.revenueByGarmentType} showAvg={false} />
-        </div>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <MoneyBreakdownCard
-            title="Revenue composition"
-            data={stats.revenueBySource}
-            labels={{
-              ALTERATION: "Standard alterations",
-              CUSTOM_INSTRUCTIONS: "Custom instructions",
-              FREEFORM: "Write-in charges",
-            }}
-          />
-          <NeedsPricingCard orders={stats.needsPricing} totalGaps={stats.totalPricingGaps} />
-        </div>
-
-        <div className="mb-3">
-          <h2 className="font-display text-lg text-ink">Historical performance</h2>
-          <p className="text-xs text-charcoal/50">
-            Trends and operational metrics built from data the app was already recording on every ticket —
-            nothing here needed a new field except the rush flag and the work-started timestamp.
-          </p>
-        </div>
-        <div className="mb-6">
-          <TrendCard months={stats.monthlyTrend} />
-        </div>
-        <div className="mb-2 grid gap-4 sm:grid-cols-3">
-          <StatCard label="On-time completion" value={stats.onTime.rate !== null ? `${stats.onTime.rate}%` : "—"} />
-          <StatCard
-            label="Avg. pickup lag"
-            value={stats.avgPickupLagDays !== null ? `${stats.avgPickupLagDays} days` : "—"}
-          />
-          <StatCard
-            label="Reopen rate"
-            value={stats.reopenRate.rate !== null ? `${stats.reopenRate.rate}%` : "—"}
-            accent={!!stats.reopenRate.rate && stats.reopenRate.rate > 15}
-          />
-          <StatCard
-            label="Avg. days to full payment"
-            value={stats.avgDaysToFullPayment !== null ? `${stats.avgDaysToFullPayment} days` : "—"}
-          />
-          <StatCard label="Rush orders" value={stats.rushShare.rate !== null ? `${stats.rushShare.rate}%` : "—"} />
-          <StatCard
-            label="Avg. time to start work"
-            value={stats.avgDaysToStart !== null ? `${stats.avgDaysToStart} days` : "—"}
-          />
-        </div>
-        <p className="mb-6 text-xs text-charcoal/40">
-          On-time completion: {stats.onTime.onTimeCount}/{stats.onTime.total} due-dated orders sealed by their
-          due date. Reopen rate: {stats.reopenRate.reopenedCount}/{stats.reopenRate.total} once-completed items
-          sent back for more work. Rush orders: {stats.rushShare.rushCount}/{stats.rushShare.total} orders
-          flagged rush.
+      {/* --- Pricing insights --- */}
+      <div className="mb-3">
+        <h2 className="font-display text-lg text-ink">Pricing insights</h2>
+        <p className="text-xs text-charcoal/50">
+          Built from the itemized price lines entered on each ticket — alteration and garment-type
+          breakdowns only cover standard pricing, since write-in charges don't have a consistent label
+          to group by.
         </p>
+      </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+        <RevenueByLabelCard title="Revenue by alteration" rows={stats.revenueByAlteration} />
+        <RevenueByLabelCard title="Revenue by garment type" rows={stats.revenueByGarmentType} showAvg={false} />
+      </div>
+      <div className="mb-6">
+        <CategoricalCompositionCard
+          title="Revenue composition"
+          valueLabel={formatCents(Object.values(stats.revenueBySource).reduce((a, b) => a + b, 0))}
+          segments={[
+            { key: "ALTERATION", label: "Standard alterations", value: stats.revenueBySource.ALTERATION ?? 0, valueLabel: formatCents(stats.revenueBySource.ALTERATION) },
+            { key: "CUSTOM_INSTRUCTIONS", label: "Custom instructions", value: stats.revenueBySource.CUSTOM_INSTRUCTIONS ?? 0, valueLabel: formatCents(stats.revenueBySource.CUSTOM_INSTRUCTIONS) },
+            { key: "FREEFORM", label: "Write-in charges", value: stats.revenueBySource.FREEFORM ?? 0, valueLabel: formatCents(stats.revenueBySource.FREEFORM) },
+          ]}
+        />
+      </div>
 
-        <div className="mb-6">
-          <TeamActivityCard rows={stats.teamActivity} />
-        </div>
+      {/* --- Client relationships --- */}
+      <div className="mb-6">
+        <TopClientsCard
+          repeatClientRatePct={clientStats.repeatClientRatePct}
+          repeatClients={clientStats.repeatClients}
+          totalClients={clientStats.totalClients}
+          topClients={clientStats.topClients}
+        />
+      </div>
 
-        <div className="grid gap-6 sm:grid-cols-2">
-          <BreakdownCard
-            title="Orders by status"
-            data={stats.orderStatusCounts}
-            labels={{ IN_PROGRESS: "In progress", SEALED: "Ready for pickup", PICKED_UP: "Fully picked up" }}
-          />
-          <BreakdownCard
-            title="Items by status"
-            data={stats.itemStatusCounts}
-            labels={{
-              PENDING: "Not started",
-              IN_PROGRESS: "In progress",
-              COMPLETED: "Completed",
-              PICKED_UP: "Picked up",
-            }}
-          />
-          <BreakdownCard
-            title="Orders by payment status"
-            data={stats.paymentCounts}
-            labels={{ UNPAID: "Unpaid", DEPOSIT_PAID: "Deposit paid", PAID: "Paid" }}
-          />
-        </div>
+      {/* --- Historical performance --- */}
+      <div className="mb-3">
+        <h2 className="font-display text-lg text-ink">Historical performance</h2>
+        <p className="text-xs text-charcoal/50">
+          Trends and operational metrics built from data the app was already recording on every ticket.
+        </p>
+      </div>
+      <div className="mb-6">
+        <MonthlyTrendChart title="Revenue by month" subtitle="Grouped by when the ticket was created." points={monthlyTrendPoints} />
+      </div>
+      <div className="mb-2 grid gap-4 sm:grid-cols-4">
+        <StatCard label="On-time completion" value={stats.onTime.rate !== null ? `${stats.onTime.rate}%` : "—"} />
+        <StatCard label="Avg. time to start work" value={stats.avgDaysToStart !== null ? `${stats.avgDaysToStart} days` : "—"} sublabel="Intake to first work" />
+        <StatCard label="Avg. work duration" value={stats.avgDaysWorking !== null ? `${stats.avgDaysWorking} days` : "—"} sublabel="Start to completion" />
+        <StatCard label="Avg. pickup lag" value={stats.avgPickupLagDays !== null ? `${stats.avgPickupLagDays} days` : "—"} />
+        <StatCard label="Reopen rate" value={stats.reopenRate.rate !== null ? `${stats.reopenRate.rate}%` : "—"} accent={!!stats.reopenRate.rate && stats.reopenRate.rate > 15} />
+        <StatCard label="Avg. days to full payment" value={stats.avgDaysToFullPayment !== null ? `${stats.avgDaysToFullPayment} days` : "—"} />
+        <StatCard label="Rush orders" value={stats.rushShare.rate !== null ? `${stats.rushShare.rate}%` : "—"} />
+      </div>
+      <p className="mb-6 text-xs text-charcoal/40">
+        On-time completion: {stats.onTime.onTimeCount}/{stats.onTime.total} due-dated orders sealed by their
+        due date. Avg. time to start + avg. work duration are the two halves of turnaround — a rising number
+        in one but not the other points at a queue problem vs. a capacity problem. Reopen rate:{" "}
+        {stats.reopenRate.reopenedCount}/{stats.reopenRate.total} once-completed items sent back for more
+        work. Rush orders: {stats.rushShare.rushCount}/{stats.rushShare.total} orders flagged rush.
+      </p>
+
+      <div className="mb-6">
+        <TeamActivityCard rows={stats.teamActivity} />
+      </div>
     </>
   );
 }
@@ -165,40 +230,6 @@ function RevenueByLabelCard({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function MoneyBreakdownCard({
-  title,
-  data,
-  labels,
-}: {
-  title: string;
-  data: Record<string, number>;
-  labels: Record<string, string>;
-}) {
-  const total = Object.values(data).reduce((a, b) => a + b, 0) || 1;
-  return (
-    <div className="rounded-2xl border border-linen bg-white p-5">
-      <p className="mb-3 text-sm font-medium text-ink">{title}</p>
-      <div className="space-y-2">
-        {Object.entries(labels).map(([key, label]) => {
-          const cents = data[key] || 0;
-          const pct = Math.round((cents / total) * 100);
-          return (
-            <div key={key}>
-              <div className="mb-1 flex justify-between text-xs text-charcoal/60">
-                <span>{label}</span>
-                <span>{formatCents(cents)}</span>
-              </div>
-              <div className="h-2 rounded-full bg-linen">
-                <div className="h-2 rounded-full bg-thread" style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -239,42 +270,6 @@ function NeedsPricingCard({
           {orders.length > 6 && <li className="text-xs text-charcoal/40">+{orders.length - 6} more orders</li>}
         </ul>
       )}
-    </div>
-  );
-}
-
-function TrendCard({
-  months,
-}: {
-  months: { month: string; label: string; revenueCents: number; orderCount: number; avgTurnaroundDays: number | null }[];
-}) {
-  const maxRevenue = Math.max(1, ...months.map((m) => m.revenueCents));
-  return (
-    <div className="rounded-2xl border border-linen bg-white p-5">
-      <p className="mb-1 text-sm font-medium text-ink">Revenue, volume &amp; turnaround by month</p>
-      <p className="mb-3 text-[11px] text-charcoal/40">
-        Revenue and order count are grouped by when the ticket was created; turnaround is grouped by when the
-        order was sealed (finished) — the two dates aren't always the same month for a given order.
-      </p>
-      <div className="space-y-3">
-        {months.map((m) => (
-          <div key={m.month}>
-            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-charcoal/60">
-              <span className="font-medium text-ink">{m.label}</span>
-              <span>
-                {formatCents(m.revenueCents)} · {m.orderCount} order{m.orderCount === 1 ? "" : "s"}
-                {m.avgTurnaroundDays !== null ? ` · ${m.avgTurnaroundDays}d avg turnaround` : ""}
-              </span>
-            </div>
-            <div className="h-2 rounded-full bg-linen">
-              <div
-                className="h-2 rounded-full bg-thread"
-                style={{ width: `${Math.round((m.revenueCents / maxRevenue) * 100)}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -328,49 +323,6 @@ function TeamActivityCard({
           </table>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatCard({ label, value, accent }: { label: string; value: number | string; accent?: boolean }) {
-  return (
-    <div className="rounded-2xl border border-linen bg-white p-5">
-      <p className="text-xs uppercase tracking-wide text-charcoal/50">{label}</p>
-      <p className={`mt-1 font-display text-3xl ${accent ? "text-alert" : "text-ink"}`}>{value}</p>
-    </div>
-  );
-}
-
-function BreakdownCard({
-  title,
-  data,
-  labels,
-}: {
-  title: string;
-  data: Record<string, number>;
-  labels: Record<string, string>;
-}) {
-  const total = Object.values(data).reduce((a, b) => a + b, 0) || 1;
-  return (
-    <div className="rounded-2xl border border-linen bg-white p-5">
-      <p className="mb-3 text-sm font-medium text-ink">{title}</p>
-      <div className="space-y-2">
-        {Object.entries(labels).map(([key, label]) => {
-          const count = data[key] || 0;
-          const pct = Math.round((count / total) * 100);
-          return (
-            <div key={key}>
-              <div className="mb-1 flex justify-between text-xs text-charcoal/60">
-                <span>{label}</span>
-                <span>{count}</span>
-              </div>
-              <div className="h-2 rounded-full bg-linen">
-                <div className="h-2 rounded-full bg-thread" style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

@@ -247,6 +247,7 @@ export async function getAnalytics(from?: string, to?: string) {
     paidAuditRows,
     rushCounts,
     startedItems,
+    cancelledOrdersForTrend,
   ] = await Promise.all([
     db.order.findMany({
       where: {
@@ -350,9 +351,24 @@ export async function getAnalytics(from?: string, to?: string) {
     // otherwise drag "avg days to start work" toward a stray removed item's numbers.
     db.orderItem.findMany({
       where: { startedAt: { not: null }, removedAt: null, ...(range ? { createdAt: range } : {}) },
-      select: { createdAt: true, startedAt: true },
+      // completedAt added alongside startedAt/createdAt so the same fetch can answer both
+      // "intake -> first work" (avgDaysToStart) and "first work -> done" (avgDaysWorking,
+      // below) — the two halves of turnaround, split so a manager can tell a slow queue
+      // apart from slow work once it's actually started.
+      select: { createdAt: true, startedAt: true, completedAt: true },
       orderBy: { startedAt: "desc" },
       take: range ? undefined : 300,
+    }),
+    // Cancellation trend — same shape/window as ordersForVolumeRevenue above, but the
+    // CANCELLED orders that query deliberately excludes. Folded into monthlyTrend below
+    // so "did cancellations spike a given month" sits right next to revenue/volume rather
+    // than needing its own separate chart.
+    db.order.findMany({
+      where: {
+        createdAt: trendUpperBound ? { gte: trendWindowStart, lte: trendUpperBound } : { gte: trendWindowStart },
+        status: "CANCELLED",
+      },
+      select: { createdAt: true },
     }),
   ]);
 
@@ -385,17 +401,30 @@ export async function getAnalytics(from?: string, to?: string) {
     arr.push((o.sealedAt.getTime() - o.createdAt.getTime()) / (1000 * 60 * 60 * 24));
     turnaroundByMonth.set(key, arr);
   }
+  // Cancellations bucket by creation month too, same as revenue/volume — "of the orders
+  // that came in this month, how many were later cancelled," not "how many were cancelled
+  // during this month" (a January order cancelled in March counts toward January).
+  const cancelledByMonth = new Map<string, number>();
+  for (const o of cancelledOrdersForTrend) {
+    const key = monthKey(o.createdAt);
+    cancelledByMonth.set(key, (cancelledByMonth.get(key) ?? 0) + 1);
+  }
   const monthlyTrend = Array.from({ length: monthsBack }, (_, i) => {
     const d = new Date(trendWindowStart);
     d.setMonth(d.getMonth() + i);
     const key = monthKey(d);
     const rev = revenueByMonth.get(key);
+    const orderCount = rev?.orderCount ?? 0;
+    const cancelledCount = cancelledByMonth.get(key) ?? 0;
+    const monthTotal = orderCount + cancelledCount;
     return {
       month: key,
       label: d.toLocaleDateString("en-US", { month: "short", year: "numeric" }),
       revenueCents: rev?.revenueCents ?? 0,
-      orderCount: rev?.orderCount ?? 0,
+      orderCount,
       avgTurnaroundDays: avg(turnaroundByMonth.get(key) ?? []),
+      cancelledCount,
+      cancellationRatePct: monthTotal > 0 ? Math.round((cancelledCount / monthTotal) * 1000) / 10 : null,
     };
   });
 
@@ -455,6 +484,31 @@ export async function getAnalytics(from?: string, to?: string) {
 
   const avgDaysToStart = avg(startedItems.map((i) => (i.startedAt!.getTime() - i.createdAt.getTime()) / (1000 * 60 * 60 * 24)));
 
+  // The other half of turnaround: once someone actually starts an item, how long does the
+  // work itself take? Only items that have gone all the way to completedAt count here —
+  // a still-in-progress item hasn't finished the "work" leg yet, so it can't contribute a
+  // duration. Paired with avgDaysToStart above, this is meant to answer "is turnaround
+  // slipping because tickets sit unstarted longer, or because the work itself is taking
+  // longer" — two different problems that used to be invisible inside one blended number.
+  const workedItems = startedItems.filter((i) => i.completedAt);
+  const avgDaysWorking = avg(
+    workedItems.map((i) => (i.completedAt!.getTime() - i.startedAt!.getTime()) / (1000 * 60 * 60 * 24))
+  );
+
+  // Cancellation rate: reuses orderStatusCounts (already fetched above, already scoped to
+  // the selected range, and — per that query's own comment — the one place CANCELLED is
+  // deliberately left in rather than filtered out) instead of a new query.
+  const cancelledOrderCount = orderStatusCounts.find((r) => r.status === "CANCELLED")?._count ?? 0;
+  const totalCreatedIncludingCancelled = orderStatusCounts.reduce((sum, r) => sum + r._count, 0);
+  const cancellationRate = {
+    rate:
+      totalCreatedIncludingCancelled > 0
+        ? Math.round((cancelledOrderCount / totalCreatedIncludingCancelled) * 1000) / 10
+        : null,
+    cancelledCount: cancelledOrderCount,
+    total: totalCreatedIncludingCancelled,
+  };
+
   return {
     totalOrders,
     orderStatusCounts: Object.fromEntries(orderStatusCounts.map((r) => [r.status, r._count])),
@@ -477,6 +531,8 @@ export async function getAnalytics(from?: string, to?: string) {
     avgDaysToFullPayment,
     rushShare,
     avgDaysToStart,
+    avgDaysWorking,
+    cancellationRate,
   };
 }
 
@@ -1035,4 +1091,211 @@ export async function getGarmentAnalytics(from?: string, to?: string): Promise<G
     .sort((a, b) => b.timesSelected - a.timesSelected);
 
   return { garments, alterations, totalItems };
+}
+
+// ============================================================================
+// Client relationships — repeat-client rate and top clients by lifetime spend.
+// There's no separate Client table (see Order's schema comment: clientName/clientPhone/
+// clientEmail live directly on Order) so clientPhone, trimmed, is the dedup key here —
+// a phone typed with different spacing/punctuation across two visits won't match, a
+// known and accepted limitation rather than something worth a real dedup pass right now.
+// ============================================================================
+
+export type TopClient = {
+  clientName: string;
+  clientPhone: string;
+  orderCount: number;
+  totalSpentCents: number;
+  lastOrderAt: Date;
+};
+
+export type ClientAnalytics = {
+  /** Of every distinct client the shop has ever had (all-time, not range-scoped — a
+   * client's history doesn't reset because a range filter is set), what share have
+   * placed more than one order. */
+  repeatClientRatePct: number | null;
+  totalClients: number;
+  repeatClients: number;
+  /** Of the orders that fall in the selected window (or all-time, unscoped), what share
+   * came from a client who had already ordered before — a client's very first-ever order
+   * never counts as "repeat," even if that first order is the only one inside the window. */
+  repeatOrderSharePct: number | null;
+  ordersInWindow: number;
+  repeatOrdersInWindow: number;
+  /** By lifetime spend (not scoped to the selected window — "who are our best clients,
+   * period" is the useful question here, not "who spent the most in the last 30 days"). */
+  topClients: TopClient[];
+};
+
+/** MANAGER: repeat-business and top-client snapshot for the Overview page. Accepts the
+ * same optional shop-local from/to as getAnalytics — only repeatOrderSharePct (which
+ * orders count as "in the window") responds to it; repeat-client identity and the
+ * top-clients list are always computed from full order history. */
+export async function getClientAnalytics(from?: string, to?: string): Promise<ClientAnalytics> {
+  await requireManager();
+  const NOT_CANCELLED = { not: "CANCELLED" as const };
+  const range = from && to ? { gte: shopDayStart(from), lte: shopDayEnd(to) } : null;
+
+  const allOrders = await db.order.findMany({
+    where: { status: NOT_CANCELLED },
+    select: { clientPhone: true, clientName: true, createdAt: true, totalPriceCents: true },
+    orderBy: { createdAt: "asc" },
+    // Generous safety cap, same spirit as the 200/300-row caps elsewhere in this file for
+    // an all-time, unbounded query — comfortably past what this shop is likely to reach
+    // any time soon, revisit if it ever gets close.
+    take: 20000,
+  });
+
+  const byPhone = new Map<string, { clientName: string; orders: { createdAt: Date; totalPriceCents: number }[] }>();
+  for (const o of allOrders) {
+    const phone = o.clientPhone.trim();
+    if (!phone) continue; // required field in practice, but stay defensive
+    const entry = byPhone.get(phone) ?? { clientName: o.clientName, orders: [] };
+    entry.clientName = o.clientName; // keep whichever name is most recent for this phone
+    entry.orders.push({ createdAt: o.createdAt, totalPriceCents: o.totalPriceCents });
+    byPhone.set(phone, entry);
+  }
+
+  const totalClients = byPhone.size;
+  let repeatClients = 0;
+  let ordersInWindow = 0;
+  let repeatOrdersInWindow = 0;
+  const topClients: TopClient[] = [];
+
+  for (const [phone, v] of byPhone) {
+    if (v.orders.length > 1) repeatClients++;
+
+    const totalSpentCents = v.orders.reduce((sum, o) => sum + o.totalPriceCents, 0);
+    topClients.push({
+      clientName: v.clientName,
+      clientPhone: phone,
+      orderCount: v.orders.length,
+      totalSpentCents,
+      lastOrderAt: v.orders[v.orders.length - 1].createdAt, // orders arrive pre-sorted asc
+    });
+
+    v.orders.forEach((o, i) => {
+      const inWindow = range ? o.createdAt >= range.gte && o.createdAt <= range.lte : true;
+      if (!inWindow) return;
+      ordersInWindow++;
+      if (i > 0) repeatOrdersInWindow++; // i > 0 means this client had an earlier order
+    });
+  }
+
+  topClients.sort((a, b) => b.totalSpentCents - a.totalSpentCents);
+
+  return {
+    repeatClientRatePct: totalClients > 0 ? Math.round((repeatClients / totalClients) * 1000) / 10 : null,
+    totalClients,
+    repeatClients,
+    repeatOrderSharePct: ordersInWindow > 0 ? Math.round((repeatOrdersInWindow / ordersInWindow) * 1000) / 10 : null,
+    ordersInWindow,
+    repeatOrdersInWindow,
+    topClients: topClients.slice(0, 8),
+  };
+}
+
+// ============================================================================
+// Aging / unclaimed items — garments that are fully finished (item status COMPLETED)
+// but haven't reached PICKED_UP yet. Deliberately unscoped by any date range, same as
+// `overdue` in getAnalytics above — this is a right-now snapshot of what's physically
+// sitting on the rack, not a historical count of what was ever waiting during some window.
+// ============================================================================
+
+export type AgingOrder = {
+  id: string;
+  orderNumber: string;
+  clientName: string;
+  maxDaysWaiting: number;
+  items: { garmentType: string; daysWaiting: number }[];
+};
+
+/** MANAGER: every finished-but-not-picked-up item, grouped by order, longest-waiting
+ * order first — the "state of the shop right now" list for Overview. */
+export async function getAgingItems(): Promise<AgingOrder[]> {
+  await requireManager();
+
+  const items = await db.orderItem.findMany({
+    where: {
+      status: "COMPLETED", // finished but not yet PICKED_UP — a real status, not inferred from a missing pickup record
+      removedAt: null,
+      order: { status: { not: "CANCELLED" } },
+    },
+    select: {
+      garmentType: true,
+      completedAt: true,
+      order: { select: { id: true, orderNumber: true, clientName: true } },
+    },
+  });
+
+  const now = Date.now();
+  const byOrder = new Map<string, AgingOrder>();
+  for (const item of items) {
+    if (!item.completedAt) continue; // status COMPLETED implies this is set, but stay defensive
+    const daysWaiting = Math.floor((now - item.completedAt.getTime()) / (1000 * 60 * 60 * 24));
+    const entry = byOrder.get(item.order.id) ?? {
+      id: item.order.id,
+      orderNumber: item.order.orderNumber,
+      clientName: item.order.clientName,
+      maxDaysWaiting: 0,
+      items: [],
+    };
+    entry.items.push({ garmentType: item.garmentType, daysWaiting });
+    entry.maxDaysWaiting = Math.max(entry.maxDaysWaiting, daysWaiting);
+    byOrder.set(item.order.id, entry);
+  }
+
+  return [...byOrder.values()].sort((a, b) => b.maxDaysWaiting - a.maxDaysWaiting);
+}
+
+// ============================================================================
+// Period headline stats — just the few numbers Overview's top KPI cards need to show a
+// "vs. previous period" delta once a date range is selected. Deliberately NOT a call into
+// the full getAnalytics suite above (which runs a couple dozen queries) — picking a date
+// range shouldn't quietly double this page's query cost just to paint a delta arrow.
+// ============================================================================
+
+export type PeriodHeadlineStats = {
+  totalRevenueCents: number;
+  avgOrderValueCents: number;
+  avgTurnaroundDays: number | null;
+  orderCount: number;
+};
+
+/** MANAGER: the handful of headline numbers for one shop-local date range, used to
+ * compute Overview's KPI deltas against the equivalent prior period. */
+export async function getPeriodHeadlineStats(from: string, to: string): Promise<PeriodHeadlineStats> {
+  await requireManager();
+  const NOT_CANCELLED = { not: "CANCELLED" as const };
+  const range = { gte: shopDayStart(from), lte: shopDayEnd(to) };
+
+  const [revenue, sealedOrders] = await Promise.all([
+    db.order.aggregate({
+      where: { status: NOT_CANCELLED, createdAt: range },
+      _sum: { totalPriceCents: true },
+      _avg: { totalPriceCents: true },
+      _count: true,
+    }),
+    // Same "sealed within this window" definition getAnalytics's own avgTurnaroundDays
+    // uses when a range is set.
+    db.order.findMany({
+      where: { status: NOT_CANCELLED, sealedAt: range },
+      select: { createdAt: true, sealedAt: true },
+    }),
+  ]);
+
+  const turnaroundDays = sealedOrders
+    .filter((o) => o.sealedAt)
+    .map((o) => (o.sealedAt!.getTime() - o.createdAt.getTime()) / (1000 * 60 * 60 * 24));
+  const avgTurnaroundDays =
+    turnaroundDays.length > 0
+      ? Math.round((turnaroundDays.reduce((a, b) => a + b, 0) / turnaroundDays.length) * 10) / 10
+      : null;
+
+  return {
+    totalRevenueCents: revenue._sum.totalPriceCents ?? 0,
+    avgOrderValueCents: Math.round(revenue._avg.totalPriceCents ?? 0),
+    avgTurnaroundDays,
+    orderCount: revenue._count,
+  };
 }

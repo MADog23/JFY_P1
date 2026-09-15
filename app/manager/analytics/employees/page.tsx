@@ -13,6 +13,7 @@ import { toDateInputValue, startOfMonth } from "@/lib/dates";
 import { StatCard } from "@/components/analytics/StatCard";
 import { BarRow, BarListCard } from "@/components/analytics/BarRow";
 import { AnalyticsRangeFilters } from "@/components/analytics/AnalyticsRangeFilters";
+import { PairedComparisonLegend, PairedBarPair } from "@/components/analytics/PairedComparisonCard";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const BASE_PATH = "/manager/analytics/employees";
@@ -169,19 +170,27 @@ function WeeklyBreakdownCard({
   }
   const maxMinutes = Math.max(1, ...weeks.map((w) => Math.max(w.scheduledMinutes, w.workedMinutes)));
   return (
-    <BarListCard title="Scheduled vs. worked, by week" subtitle="Shop weeks run Monday–Sunday.">
-      {weeks.map((w) => (
-        <div key={w.weekStart}>
-          <p className="mb-1 text-xs font-medium text-ink">
-            Week of {w.weekStart}
-            {w.overtimeMinutes > 0 && <span className="ml-2 text-alert">+{formatMinutesAsHours(w.overtimeMinutes)} OT</span>}
-          </p>
-          <div className="space-y-1">
-            <BarRow label="Scheduled" valueLabel={formatMinutesAsHours(w.scheduledMinutes)} pct={(w.scheduledMinutes / maxMinutes) * 100} />
-            <BarRow label="Worked" valueLabel={formatMinutesAsHours(w.workedMinutes)} pct={(w.workedMinutes / maxMinutes) * 100} />
-          </div>
-        </div>
-      ))}
-    </BarListCard>
+    <div className="rounded-2xl border border-linen bg-white p-5">
+      <p className="text-sm font-medium text-ink">Scheduled vs. worked, by week</p>
+      <p className="mb-3 text-[11px] text-charcoal/40">Shop weeks run Monday–Sunday.</p>
+      {/* A genuine before/after comparison per week — two fixed colors with one legend
+          for the whole card, instead of two same-colored bars a reader had to eyeball
+          against each other (see PairedComparisonCard's header comment). */}
+      <PairedComparisonLegend labelA="Scheduled" labelB="Worked" />
+      <div className="space-y-3">
+        {weeks.map((w) => (
+          <PairedBarPair
+            key={w.weekStart}
+            groupLabel={`Week of ${w.weekStart}`}
+            valueA={w.scheduledMinutes}
+            valueB={w.workedMinutes}
+            valueLabelA={formatMinutesAsHours(w.scheduledMinutes)}
+            valueLabelB={formatMinutesAsHours(w.workedMinutes)}
+            max={maxMinutes}
+            note={w.overtimeMinutes > 0 ? <span className="text-alert">+{formatMinutesAsHours(w.overtimeMinutes)} OT</span> : undefined}
+          />
+        ))}
+      </div>
+    </div>
   );
 }

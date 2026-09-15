@@ -11,6 +11,9 @@ import { formatCents } from "@/lib/money";
 import { StatCard } from "@/components/analytics/StatCard";
 import { BarRow, BarListCard } from "@/components/analytics/BarRow";
 import { AnalyticsRangeFilters } from "@/components/analytics/AnalyticsRangeFilters";
+import { MonthlyTrendChart } from "@/components/analytics/MonthlyTrendChart";
+import { OrdinalBreakdownCard } from "@/components/analytics/OrdinalBreakdownCard";
+import { CategoricalCompositionCard } from "@/components/analytics/CategoricalCompositionCard";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -20,11 +23,16 @@ export default async function PricingAnalyticsPage({ searchParams }: { searchPar
   const hasRange = !!(from && to);
   const stats = await getPricingAnalytics(from, to);
 
-  const maxMonthlyRevenue = Math.max(1, ...stats.monthlyTrend.map((m) => m.revenueCents));
   const maxAlterationRevenue = Math.max(1, ...stats.revenueByAlteration.map((r) => r.totalCents));
   const maxGarmentRevenue = Math.max(1, ...stats.revenueByGarmentType.map((r) => r.totalCents));
-  const maxBucketCount = Math.max(1, ...stats.priceDistribution.map((b) => b.count));
-  const sourceTotal = Object.values(stats.revenueBySource).reduce((a, b) => a + b, 0) || 1;
+  const totalCompositionCents = Object.values(stats.revenueBySource).reduce((a, b) => a + b, 0);
+
+  const monthlyTrendPoints = stats.monthlyTrend.map((m) => ({
+    month: m.month,
+    label: m.label,
+    valueCents: m.revenueCents,
+    meta: `${m.orderCount} order${m.orderCount === 1 ? "" : "s"} · avg ${formatCents(m.avgOrderValueCents)}`,
+  }));
 
   return (
     <>
@@ -51,18 +59,7 @@ export default async function PricingAnalyticsPage({ searchParams }: { searchPar
       </div>
 
       <div className="mb-6">
-        <BarListCard title="Revenue &amp; volume by month" subtitle="Grouped by when the ticket was created.">
-          {stats.monthlyTrend.map((m) => (
-            <BarRow
-              key={m.month}
-              label={m.label}
-              valueLabel={`${formatCents(m.revenueCents)} · ${m.orderCount} order${m.orderCount === 1 ? "" : "s"} · avg ${formatCents(
-                m.avgOrderValueCents
-              )}`}
-              pct={(m.revenueCents / maxMonthlyRevenue) * 100}
-            />
-          ))}
-        </BarListCard>
+        <MonthlyTrendChart title="Revenue & volume by month" subtitle="Grouped by when the ticket was created." points={monthlyTrendPoints} />
       </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
@@ -97,28 +94,23 @@ export default async function PricingAnalyticsPage({ searchParams }: { searchPar
       </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
-        <BarListCard title="Order value distribution" subtitle="Every non-cancelled order, by its total ticket price.">
-          {stats.priceDistribution.map((b) => (
-            <BarRow key={b.label} label={b.label} valueLabel={`${b.count} order${b.count === 1 ? "" : "s"}`} pct={(b.count / maxBucketCount) * 100} />
-          ))}
-        </BarListCard>
-
-        <div className="rounded-2xl border border-linen bg-white p-5">
-          <p className="mb-3 text-sm font-medium text-ink">Revenue composition</p>
-          <div className="space-y-2">
-            {(
-              [
-                ["ALTERATION", "Standard alterations"],
-                ["CUSTOM_INSTRUCTIONS", "Custom instructions"],
-                ["FREEFORM", "Write-in charges"],
-              ] as const
-            ).map(([key, label]) => {
-              const cents = stats.revenueBySource[key] || 0;
-              const pct = Math.round((cents / sourceTotal) * 100);
-              return <BarRow key={key} label={label} valueLabel={formatCents(cents)} pct={pct} />;
-            })}
-          </div>
-        </div>
+        {/* Order value distribution is a price ladder (Under $25 -> $400+) — an ordinal
+            sequence, not unrelated categories, so it gets the same graduated single-hue
+            treatment as Overview's status breakdowns rather than a plain magnitude bar. */}
+        <OrdinalBreakdownCard
+          title="Order value distribution"
+          subtitle="Every non-cancelled order, by its total ticket price."
+          stages={stats.priceDistribution.map((b) => ({ key: b.label, label: b.label, count: b.count }))}
+        />
+        <CategoricalCompositionCard
+          title="Revenue composition"
+          valueLabel={formatCents(totalCompositionCents)}
+          segments={[
+            { key: "ALTERATION", label: "Standard alterations", value: stats.revenueBySource.ALTERATION ?? 0, valueLabel: formatCents(stats.revenueBySource.ALTERATION) },
+            { key: "CUSTOM_INSTRUCTIONS", label: "Custom instructions", value: stats.revenueBySource.CUSTOM_INSTRUCTIONS ?? 0, valueLabel: formatCents(stats.revenueBySource.CUSTOM_INSTRUCTIONS) },
+            { key: "FREEFORM", label: "Write-in charges", value: stats.revenueBySource.FREEFORM ?? 0, valueLabel: formatCents(stats.revenueBySource.FREEFORM) },
+          ]}
+        />
       </div>
 
       <div className="rounded-2xl border border-linen bg-white p-5">
